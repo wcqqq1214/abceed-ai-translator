@@ -80,12 +80,26 @@ export function createWordTranslator(gmRequest) {
   };
 }
 
+export function selectionPopupPosition(anchor, width, height, viewportWidth, viewportHeight) {
+  const gap = 10, margin = 12;
+  const below = Math.max(0, viewportHeight - margin - anchor.bottom - gap);
+  const above = Math.max(0, anchor.top - gap - margin);
+  const useBelow = below >= height || (above < height && below >= above);
+  const maxHeight = Math.min(220, useBelow ? below : above);
+  const actualHeight = Math.min(height, maxHeight);
+  return {
+    left: Math.max(margin, Math.min(anchor.left, viewportWidth - width - margin)),
+    top: useBelow ? anchor.bottom + gap : anchor.top - gap - actualHeight,
+    maxHeight
+  };
+}
+
 export class WordLookup {
   constructor({ doc, win, root, getConfig, translate, translateSelection, cache }) {
     Object.assign(this, { doc, win, root, getConfig, translate, translateSelection, cache });
     this.generation = 0;
     const style = doc.createElement('style');
-    style.textContent = `.word-popup{position:fixed;width:min(280px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:15px 17px;background:#fff;border:1px solid #e7e8ed;border-radius:14px;box-shadow:0 8px 30px #17203322;color:#333946;text-align:left}.selection-action{border:1px solid #f5c8d1;border-radius:8px;background:#fff3f5;color:#d73b57;padding:7px 12px;margin-top:10px;font-size:13px}.word-heading{display:flex;align-items:center;gap:12px}.word-title{flex:1;font-size:16px;font-weight:600;overflow-wrap:anywhere}.word-close{border:0;background:none;color:#858d99;font-size:19px;padding:0 3px}.word-meaning{margin-top:8px;font-size:13px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}`;
+    style.textContent = `.word-popup{position:fixed;width:min(280px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:15px 17px;background:#fff;border:1px solid #e7e8ed;border-radius:14px;box-shadow:0 8px 30px #17203322;color:#333946;text-align:left}.word-heading{display:flex;align-items:center;gap:12px}.word-title{flex:1;font-size:16px;font-weight:600;overflow-wrap:anywhere}.word-close{border:0;background:none;color:#858d99;font-size:19px;padding:0 3px}.word-meaning{margin-top:8px;font-size:13px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}`;
     root.append(style);
     this.popup = doc.createElement('section');
     this.popup.className = 'word-popup';
@@ -104,20 +118,16 @@ export class WordLookup {
     this.meaning = doc.createElement('p');
     this.meaning.className = 'word-meaning';
     this.meaning.setAttribute('role', 'status');
-    this.selectionAction = doc.createElement('button');
-    this.selectionAction.className = 'selection-action';
-    this.selectionAction.textContent = '翻译选中文字';
-    this.selectionAction.hidden = true;
-    this.popup.append(heading, this.meaning, this.selectionAction);
+    this.popup.append(heading, this.meaning);
     root.append(this.popup);
     this.onDoubleClick = event => {
       const word = selectedEnglishWord(doc, event.target);
-      if (word) void this.lookup(word, event.clientX, event.clientY);
+      if (word) void this.lookup(word, event.clientX, event.clientY, 'word', doc.getSelection().getRangeAt(0).getBoundingClientRect());
     };
     this.onSelection = event => {
       if (!this.translateSelection || event.button !== 0 || event.detail >= 2) return;
       const text = selectedEnglishText(doc, event.target);
-      if (text) this.offerSelection(text, event.clientX, event.clientY);
+      if (text && !ENGLISH_WORD.test(text)) void this.lookup(text, event.clientX, event.clientY, 'selection', doc.getSelection().getRangeAt(0).getBoundingClientRect());
     };
     this.onOutside = event => { if (!event.composedPath().includes(root.host || this.popup)) this.hide(); };
     this.onKey = event => { if (event.key === 'Escape') this.hide(); };
@@ -134,39 +144,26 @@ export class WordLookup {
     this.generation++;
     this.controller?.abort();
     this.popup.hidden = true;
-    this.selectionAction.onclick = null;
   }
 
-  position(x, y) {
+  position(x, y, anchor) {
+    this.popup.style.maxHeight = '220px';
     const box = this.popup.getBoundingClientRect();
-    this.popup.style.left = `${Math.max(12, Math.min(x, this.win.innerWidth - box.width - 12))}px`;
-    this.popup.style.top = `${Math.max(12, Math.min(y + 16, this.win.innerHeight - box.height - 12))}px`;
+    const placement = selectionPopupPosition(anchor || { left: x, top: y, bottom: y }, box.width, box.height, this.win.innerWidth, this.win.innerHeight);
+    this.popup.style.left = `${placement.left}px`;
+    this.popup.style.top = `${placement.top}px`;
+    this.popup.style.maxHeight = `${placement.maxHeight}px`;
   }
 
-  offerSelection(text, x, y) {
-    this.hide();
-    const url = this.win.location.href;
-    this.popup.hidden = false;
-    this.title.textContent = '划选翻译';
-    this.meaning.hidden = true;
-    this.selectionAction.hidden = false;
-    this.selectionAction.onclick = () => {
-      if (url !== this.win.location.href) { this.hide(); return; }
-      void this.lookup(text, x, y, 'selection');
-    };
-    this.position(x, y);
-  }
-
-  async lookup(word, x, y, mode = 'word') {
+  async lookup(word, x, y, mode = 'word', anchor) {
     this.hide();
     const generation = this.generation;
     const url = this.win.location.href;
     this.popup.hidden = false;
     this.title.textContent = mode === 'selection' ? '划选翻译' : word;
-    this.selectionAction.hidden = true;
     this.meaning.hidden = false;
     this.meaning.textContent = mode === 'selection' ? 'AI 正在翻译…' : 'AI 正在查询…';
-    this.position(x, y);
+    this.position(x, y, anchor);
     try {
       const config = this.getConfig();
       const scope = `${config.endpoint}\n${config.model}`;
@@ -174,7 +171,7 @@ export class WordLookup {
       const cacheKey = mode === 'selection' ? `selection:${word}` : word;
       const format = mode === 'selection' ? text => text : formatWordMeaning;
       const cached = this.cache.get(cacheKey);
-      if (cached !== undefined) { this.meaning.textContent = format(cached); this.position(x, y); return; }
+      if (cached !== undefined) { this.meaning.textContent = format(cached); this.position(x, y, anchor); return; }
       this.controller = new AbortController();
       const meaning = await (mode === 'selection' ? this.translateSelection : this.translate)(word, config, this.controller.signal);
       if (generation !== this.generation) return;
@@ -186,7 +183,7 @@ export class WordLookup {
       if (generation !== this.generation) return;
       this.meaning.textContent = error.message;
     }
-    this.position(x, y);
+    this.position(x, y, anchor);
   }
 
   clearCache() { this.hide(); this.cache.clear(); }

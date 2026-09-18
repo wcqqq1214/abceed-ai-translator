@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { selectedEnglishWord, createWordTranslator, WordLookup, formatWordMeaning, selectedEnglishText, createSelectionTranslator } from '../src/words.js';
+import { selectedEnglishWord, createWordTranslator, WordLookup, formatWordMeaning, selectedEnglishText, createSelectionTranslator, selectionPopupPosition } from '../src/words.js';
 import { TranslationCache } from '../src/cache.js';
 
 const config = { endpoint: 'https://api.deepseek.com/chat/completions', model: 'test', key: 'test-only' };
@@ -125,24 +125,49 @@ test('selection API translates phrases without dictionary or Japanese-only prote
   assert.deepEqual(body.thinking, { type: 'disabled' });
 });
 
-test('selection waits for explicit click and caches separately from word definitions', async () => {
+test('selection translates automatically and caches separately from word definitions', async () => {
   const { dom, words, cache } = setup(async () => 'n. 会议');
   let calls = 0;
   words.translateSelection = async () => { calls++; return '会议'; };
   await words.lookup('meeting', 10, 10);
-  words.offerSelection('meeting', 10, 10);
-  assert.equal(calls, 0);
-  assert.equal(words.selectionAction.hidden, false);
-  words.selectionAction.click();
-  await new Promise(resolve => setTimeout(resolve, 0));
+  await words.lookup('meeting', 10, 10, 'selection');
   assert.equal(calls, 1);
   assert.equal(words.meaning.textContent, '会议');
-  assert.equal(words.selectionAction.hidden, true);
   assert.equal(cache.get('meeting'), 'n. 会议');
   assert.equal(cache.get('selection:meeting'), '会议');
   await words.lookup('meeting', 10, 10, 'selection');
   assert.equal(calls, 1);
   words.clearCache();
   assert.equal(cache.get('selection:meeting'), undefined);
+  words.destroy(); dom.window.close();
+});
+
+
+test('popup remains outside multiline selection and constrains height near viewport edges', () => {
+  const anchor = { left: 200, top: 200, bottom: 320 };
+  const below = selectionPopupPosition(anchor, 280, 120, 1000, 700);
+  assert.ok(below.top >= anchor.bottom + 10);
+  const above = selectionPopupPosition({ left: 900, top: 500, bottom: 650 }, 280, 160, 1000, 700);
+  assert.ok(above.top + 160 <= 490);
+  assert.equal(above.left, 708);
+  const constrained = selectionPopupPosition({ left: 200, top: 150, bottom: 550 }, 280, 220, 1000, 700);
+  assert.equal(constrained.maxHeight, 128);
+  assert.ok(constrained.top >= 560);
+});
+
+test('drag mouseup translates selected phrase without click and ignores double-click mouseup', async () => {
+  const { dom, doc, words } = setup(async () => 'n. 测试');
+  const p = doc.querySelector('p');
+  const range = doc.createRange(); range.selectNodeContents(p);
+  dom.window.Range.prototype.getBoundingClientRect = () => ({ left: 100, top: 100, bottom: 120 });
+  doc.getSelection().addRange(range);
+  let calls = 0;
+  words.translateSelection = async text => { calls++; assert.equal(text, 'English stays here.'); return '英文保留在这里。'; };
+  p.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true, button: 0, detail: 1 }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(calls, 1);
+  assert.equal(words.meaning.textContent, '英文保留在这里。');
+  p.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true, button: 0, detail: 2 }));
+  assert.equal(calls, 1);
   words.destroy(); dom.window.close();
 });
