@@ -1,7 +1,7 @@
 import { normalizeConfig, createTranslator } from './core.js';
 import { TranslationEngine } from './engine.js';
 import { TranslationCache } from './cache.js';
-import { WordLookup, createWordTranslator } from './words.js';
+import { WordLookup, createWordTranslator, createSelectionTranslator } from './words.js';
 
 (() => {
   if (document.querySelector('[data-abceed-ai-ui]')) return;
@@ -126,6 +126,7 @@ import { WordLookup, createWordTranslator } from './words.js';
   const words = new WordLookup({ doc: document, win: window, root,
     getConfig: () => normalizeConfig({ endpoint: endpoint.value, model: model.value, key: key.value }),
     translate: createWordTranslator(GM_xmlhttpRequest),
+    translateSelection: createSelectionTranslator(GM_xmlhttpRequest),
     cache: new TranslationCache({ read: () => GM_getValue('wordCache', undefined), write: snapshot => GM_setValue('wordCache', snapshot) })
   });
 

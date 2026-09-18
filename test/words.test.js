@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { selectedEnglishWord, createWordTranslator, WordLookup, formatWordMeaning } from '../src/words.js';
+import { selectedEnglishWord, createWordTranslator, WordLookup, formatWordMeaning, selectedEnglishText, createSelectionTranslator } from '../src/words.js';
 import { TranslationCache } from '../src/cache.js';
 
 const config = { endpoint: 'https://api.deepseek.com/chat/completions', model: 'test', key: 'test-only' };
@@ -93,5 +93,56 @@ test('formats cached Chinese part-of-speech labels without changing definitions'
   await words.lookup('word', 100, 100);
   assert.equal(words.meaning.textContent, 'n. 词；v. 措辞');
   assert.equal(calls, 0);
+  words.destroy(); dom.window.close();
+});
+
+
+test('phrase selection supports nested text and rejects editable or oversized content', () => {
+  const dom = new JSDOM('<p>The <b>meeting</b> was postponed.</p><div contenteditable>private message</div>');
+  const doc = dom.window.document;
+  const select = element => {
+    const range = doc.createRange(); range.selectNodeContents(element);
+    doc.getSelection().removeAllRanges(); doc.getSelection().addRange(range);
+  };
+  const p = doc.querySelector('p'); select(p);
+  assert.equal(selectedEnglishText(doc, p.querySelector('b')), 'The meeting was postponed.');
+  const editable = doc.querySelector('div'); select(editable);
+  assert.equal(selectedEnglishText(doc, editable), null);
+  p.textContent = 'a'.repeat(3001); select(p);
+  assert.equal(selectedEnglishText(doc, p), null);
+  dom.window.close();
+});
+
+test('selection API translates phrases without dictionary or Japanese-only protection', async () => {
+  let body;
+  const translate = createSelectionTranslator(options => {
+    body = JSON.parse(options.data);
+    queueMicrotask(() => options.onload({ status: 200, responseText: JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '{"translation":"会议已推迟。"}' } }] }) }));
+    return { abort() {} };
+  });
+  assert.equal(await translate('The meeting was postponed.', config), '会议已推迟。');
+  assert.deepEqual(JSON.parse(body.messages[1].content), { text: 'The meeting was postponed.' });
+  assert.deepEqual(body.thinking, { type: 'disabled' });
+});
+
+test('selection waits for explicit click and caches separately from word definitions', async () => {
+  const { dom, words, cache } = setup(async () => 'n. 会议');
+  let calls = 0;
+  words.translateSelection = async () => { calls++; return '会议'; };
+  await words.lookup('meeting', 10, 10);
+  words.offerSelection('meeting', 10, 10);
+  assert.equal(calls, 0);
+  assert.equal(words.selectionAction.hidden, false);
+  words.selectionAction.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(calls, 1);
+  assert.equal(words.meaning.textContent, '会议');
+  assert.equal(words.selectionAction.hidden, true);
+  assert.equal(cache.get('meeting'), 'n. 会议');
+  assert.equal(cache.get('selection:meeting'), '会议');
+  await words.lookup('meeting', 10, 10, 'selection');
+  assert.equal(calls, 1);
+  words.clearCache();
+  assert.equal(cache.get('selection:meeting'), undefined);
   words.destroy(); dom.window.close();
 });
