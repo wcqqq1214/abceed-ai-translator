@@ -1,0 +1,29 @@
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+const script = await readFile(new URL('../dist/abceed-ai-translator.user.js', import.meta.url), 'utf8');
+const html = `<!doctype html><html lang="ja"><meta charset="utf-8"><title>abceed AI — 本地模拟验证</title>
+<style>body{font:17px system-ui;max-width:850px;margin:50px auto;padding:0 22px;color:#203631;background:#f5f7f4}header{margin-bottom:32px}h1{font-size:28px}article{padding:30px;background:white;border:1px solid #dce4dc;border-radius:18px}button{padding:10px 18px;cursor:pointer}aside{color:#62706a;font-size:14px}p{line-height:1.8}.spacer{height:950px}</style>
+<header><aside translate="no">本地模拟验证 · 使用固定测试响应，不调用真实 AI</aside><h1>英語の練習</h1></header>
+<article><h2 id="heading">問題</h2><p id="english">The meeting has been postponed until Friday.</p><p id="mixed">「postponed」は過去分詞です。</p><p id="japanese">正しい答えを選んでください。</p><button id="reveal" type="button">解説を見る</button><p id="explanation" hidden>この文は受動態です。</p></article>
+<div class="spacer"></div><p id="offscreen">次の問題</p>
+<script>
+const memory = new Map([['config',{endpoint:'https://demo.invalid/v1/chat/completions',model:'mock-only',enabled:true}],['apiKey','demo-not-a-real-key']]);
+window.GM_getValue=(key,fallback)=>memory.has(key)?memory.get(key):fallback;
+window.GM_setValue=(key,value)=>memory.set(key,value);
+window.GM_deleteValue=key=>memory.delete(key);
+window.GM_registerMenuCommand=()=>{};
+window.GM_xmlhttpRequest=options=>{
+  const entries=JSON.parse(JSON.parse(options.data).messages[1].content).entries;
+  const dictionary={'英語の練習':'英语练习','問題':'题目','正しい答えを選んでください。':'请选择正确答案。','解説を見る':'查看解析','この文は受動態です。':'这句话使用了被动语态。','次の問題':'下一题'};
+  const translations=entries.map(({id,text})=>({id,text:dictionary[text]||text.replace('は過去分詞です。','是过去分词。')}));
+  const timer=setTimeout(()=>options.onload({status:200,responseText:JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({translations})}}]})}),250);
+  return {abort(){clearTimeout(timer);options.onabort();}};
+};
+document.querySelector('#reveal').onclick=()=>{document.querySelector('#explanation').hidden=false;};
+</script><script src="/userscript.js"></script></html>`;
+const server = createServer((req, res) => {
+  if (req.url !== '/' && req.url !== '/userscript.js') { res.writeHead(404); res.end(); return; }
+  res.setHeader('Content-Type', req.url === '/' ? 'text/html; charset=utf-8' : 'application/javascript; charset=utf-8');
+  res.end(req.url === '/' ? html : script);
+});
+server.listen(4173, '127.0.0.1', () => console.log('Mock-only demo: http://127.0.0.1:4173 (no provider requests)'));
