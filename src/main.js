@@ -1,4 +1,4 @@
-import { attachFrameBridge, attachContentLookup } from './frames.js';
+import { attachFrameBridge, attachContentLookup, attachAutoFrameBridge } from './frames.js';
 import { normalizeConfig, createTranslator } from './core.js';
 import { TranslationEngine } from './engine.js';
 import { TranslationCache } from './cache.js';
@@ -136,10 +136,12 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
     cache: new TranslationCache({ read: () => GM_getValue('wordCache', undefined), write: snapshot => GM_setValue('wordCache', snapshot) })
   });
 
+  const autoFrameBridge = attachAutoFrameBridge({ win: window, doc: document, engine });
   const frameBridge = attachFrameBridge({ win: window, doc: document, getConfig: words.getConfig,
     translate: words.translate, translateSelection: words.translateSelection, cache: words.cache });
 
   start.onclick = () => {
+    autoFrameBridge.cancelAll();
     frameBridge.cancelAll();
     words.hide();
     engine.pause();
@@ -154,10 +156,11 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
     } catch (error) { setStatus(error.message, 'paused'); }
   };
   pause.onclick = () => {
+    autoFrameBridge.cancelAll();
     engine.pause();
     GM_setValue('config', { ...GM_getValue('config', {}), enabled: false });
   };
-  clear.onclick = () => { frameBridge.cancelAll(); words.clearCache(); engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
+  clear.onclick = () => { autoFrameBridge.cancelAll(); frameBridge.cancelAll(); words.clearCache(); engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
   GM_registerMenuCommand('abceed AI 翻译设置', () => show(true));
   if (saved.enabled && key.value) {
     try { engine.start(normalizeConfig({ ...saved, key: key.value })); }

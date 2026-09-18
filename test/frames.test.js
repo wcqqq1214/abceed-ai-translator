@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { attachFrameBridge, createFrameRequester } from '../src/frames.js';
+import { attachFrameBridge, createFrameRequester, attachAutoFrameBridge, attachContentAutoTranslation } from '../src/frames.js';
 import { TranslationCache } from '../src/cache.js';
 
 const channel = 'abceed-ai-lookup-v1';
@@ -65,4 +65,51 @@ test('frame requester checks response source and origin and sends no provider se
   win.dispatchEvent(new win.MessageEvent('message', { source: win.parent, origin: 'https://app.abceed.com', data: response }));
   assert.equal(await pending, 'n. 会议');
   dom.window.close();
+});
+
+
+test('iframe automatic batches share parent cache, budget, and pause controls', async () => {
+  const dom = new JSDOM('<iframe></iframe>', { url: 'https://app.abceed.com' });
+  const win = dom.window, doc = win.document, source = doc.querySelector('iframe').contentWindow;
+  const replies = [];
+  source.postMessage = data => replies.push(data);
+  let calls = 0;
+  const engine = { active: true, generation: 1, config, used: 0, budget: 50000, cache: new TranslationCache(),
+    translate: async texts => { calls++; assert.deepEqual(texts, ['解説']); return ['解析']; } };
+  engine.cache.load('test');
+  const bridge = attachAutoFrameBridge({ win, doc, engine });
+  const send = (mode, text) => win.dispatchEvent(new win.MessageEvent('message', { origin, source, data: { channel, id: String(replies.length), type: 'request', mode, text } }));
+  send('state', ''); await wait();
+  assert.deepEqual(replies[0].result, { enabled: true, revision: 1, scope: 'test' });
+  send('auto', ['解説']); await wait();
+  send('auto', ['解説']); await wait();
+  assert.equal(calls, 1); assert.equal(engine.used, 2);
+  assert.deepEqual(replies[2].result, ['解析']);
+  engine.active = false; engine.generation++;
+  send('auto', ['新しい説明']); await wait();
+  assert.match(replies[3].error, /暂停/);
+  assert.equal(calls, 1);
+  bridge.destroy(); dom.window.close();
+});
+
+test('embedded Japanese translates in place while English stays intact and parent pause is followed', async () => {
+  const dom = new JSDOM('<p id="jp">解説</p><p id="en">Please read the memo.</p>', { url: 'https://private.abceed.com/contents/test.html', pretendToBeVisual: true });
+  const win = dom.window, doc = win.document;
+  win.Range.prototype.getClientRects = () => [{ width: 80, height: 20, left: 0, right: 80, top: 0, bottom: 20 }];
+  let enabled = true, revision = 1, calls = 0;
+  const automatic = attachContentAutoTranslation(doc, win, async (mode, texts) => {
+    if (mode === 'state') return { enabled, revision, scope: 'test' };
+    calls++; assert.deepEqual(texts, ['解説']); return ['解析'];
+  });
+  await wait();
+  automatic.engine.schedule = () => {};
+  await automatic.engine.tick();
+  assert.equal(doc.querySelector('#jp').textContent, '解析');
+  assert.equal(doc.querySelector('#en').textContent, 'Please read the memo.');
+  assert.equal(calls, 1);
+  enabled = false; await automatic.sync();
+  assert.equal(automatic.engine.active, false);
+  enabled = true; revision++; await automatic.sync();
+  assert.equal(automatic.engine.active, true);
+  automatic.destroy(); dom.window.close();
 });
