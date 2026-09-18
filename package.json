@@ -1,6 +1,6 @@
 {
   "name": "abceed-ai-translator",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "private": true,
   "type": "module",
   "description": "Automatically replace Japanese with AI-translated Chinese on abceed, keeping English intact.",

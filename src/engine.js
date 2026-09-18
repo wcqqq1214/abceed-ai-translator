@@ -140,7 +140,7 @@ export class TranslationEngine {
       size += text.length;
     }
     if (!groups.size) {
-      this.onStatus(`自动翻译中 · 已替换 ${this.count} 处 · 缓存命中 ${this.cacheHits} 处${oversized ? ` · ${oversized} 处文本过长，未发送` : ''}`, 'running');
+      this.onStatus(`自动翻译中${oversized ? ` · ${oversized} 处文本过长，未发送` : ''}`, 'running');
       return;
     }
     if (this.used + size > this.budget) {

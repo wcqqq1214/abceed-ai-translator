@@ -105,8 +105,9 @@ import { TranslationCache } from './cache.js';
   });
   const setStatus = (text, state) => {
     // Avoid DOM observer churn caused by identical status updates.
-    const detail = text.replace(/^自动翻译中 · /, '');
+    const detail = text.replace(/^自动翻译中(?: · |$)/, '');
     if (status.textContent !== detail) status.textContent = detail;
+    status.hidden = !detail;
     statusCard.dataset.state = state || '';
     toggle.dataset.state = state || '';
     statusTitle.textContent = state === 'running' ? '自动翻译中' : state === 'paused' ? '已暂停' : '等待配置';

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.2.3
+// @version      1.2.4
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -401,7 +401,7 @@ class TranslationEngine {
       size += text.length;
     }
     if (!groups.size) {
-      this.onStatus(`自动翻译中 · 已替换 ${this.count} 处 · 缓存命中 ${this.cacheHits} 处${oversized ? ` · ${oversized} 处文本过长，未发送` : ''}`, 'running');
+      this.onStatus(`自动翻译中${oversized ? ` · ${oversized} 处文本过长，未发送` : ''}`, 'running');
       return;
     }
     if (this.used + size > this.budget) {
@@ -546,8 +546,9 @@ class TranslationEngine {
   });
   const setStatus = (text, state) => {
     // Avoid DOM observer churn caused by identical status updates.
-    const detail = text.replace(/^自动翻译中 · /, '');
+    const detail = text.replace(/^自动翻译中(?: · |$)/, '');
     if (status.textContent !== detail) status.textContent = detail;
+    status.hidden = !detail;
     statusCard.dataset.state = state || '';
     toggle.dataset.state = state || '';
     statusTitle.textContent = state === 'running' ? '自动翻译中' : state === 'paused' ? '已暂停' : '等待配置';
