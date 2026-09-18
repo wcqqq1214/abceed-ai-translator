@@ -5,7 +5,7 @@
 ## 使用
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/)，再 **[安装脚本](https://raw.githubusercontent.com/wcqqq1214/abceed-ai-translator/main/dist/abceed-ai-translator.user.js)**。
-2. 打开 abceed，点击右下角「AI 翻译」，填写 HTTPS API 地址、模型和 Key，点击「保存并开启」。
+2. 打开 abceed，点击右下角「AI 翻译」，展开「接口设置」，填写 HTTPS API 地址、模型和 Key，点击「保存并开启」。
 3. 关闭其他整页翻译；勾选「记住密钥」可在下次打开时自动运行。
 
 双击英文单词查看释义；划选英文短语或句子后自动翻译。均使用 AI，保留原文并缓存结果。
