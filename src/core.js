@@ -33,14 +33,16 @@ export function protectEnglish(text) {
   return { masked, values };
 }
 
+class EnglishProtectionError extends Error {}
+
 export function restoreEnglish(translated, protectedText) {
   let remaining = translated;
   for (const { token } of protectedText.values) {
-    if (remaining.split(token).length !== 2) throw new Error('AI 未完整保留英语内容，已停止替换。请重试或更换模型。');
+    if (remaining.split(token).length !== 2) throw new EnglishProtectionError('AI 未完整保留英语内容，已停止替换。请重试或更换模型。');
     remaining = remaining.replace(token, '');
   }
   if (/[\p{Script=Latin}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(remaining)) {
-    throw new Error('AI 返回了未翻译的日文或额外英语，已停止替换。请重试或更换模型。');
+    throw new EnglishProtectionError('AI 返回了未翻译的日文或额外英语，已停止替换。请重试或更换模型。');
   }
   let result = translated;
   for (const { token, value } of protectedText.values) result = result.replace(token, () => value);
@@ -88,18 +90,19 @@ export function parseResponse(raw, protectedTexts) {
   return protectedTexts.map((part, index) => {
     if (!byId.has(String(index))) throw new Error('AI 返回的译文 ID 不正确。');
     const output = byId.get(String(index)).trim();
+    const restored = restoreEnglish(output, part);
     // Reject reordered placeholders too; the English exercise must remain unchanged.
     let previous = -1;
     for (const { token } of part.values) {
       const position = output.indexOf(token);
-      if (position <= previous) throw new Error('AI 改变了英语内容的顺序，已停止替换。');
+      if (position <= previous) throw new EnglishProtectionError('AI 改变了英语内容的顺序，已停止替换。');
       previous = position;
     }
-    return restoreEnglish(output, part);
+    return restored;
   });
 }
 
-export function createTranslator(gmRequest) {
+function createRequestTranslator(gmRequest) {
   return (texts, config, signal) => new Promise((resolve, reject) => {
     const { protectedTexts, body } = makeRequest(texts, config.model);
     // DeepSeek enables thinking by default; translation prioritizes response speed.
@@ -145,4 +148,53 @@ export function createTranslator(gmRequest) {
       });
     } catch { finish(new Error('无法创建请求，请检查脚本权限和 API 地址。')); }
   });
+}
+
+
+export function createTranslator(gmRequest) {
+  const request = createRequestTranslator(gmRequest);
+  return async (texts, config, signal) => {
+    try { return await request(texts, config, signal); }
+    catch (error) {
+      if (!(error instanceof EnglishProtectionError) || signal?.aborted) throw error;
+      // One bounded recovery pass: the model cannot move or remove English because
+      // only Japanese spans are translated; original English is stitched in locally.
+      const fragments = [];
+      const plans = texts.map(text => {
+        const { masked, values } = protectEnglish(text);
+        const pieces = [];
+        const add = value => {
+          if (!hasJapanese(value)) { pieces.push(value); return; }
+          const index = fragments.length;
+          fragments.push(value.trim());
+          pieces.push({ index, leading: value.match(/^\s*/)[0], trailing: value.match(/\s*$/)[0] });
+        };
+        let cursor = 0;
+        for (const { token, value } of values) {
+          const position = masked.indexOf(token, cursor);
+          add(masked.slice(cursor, position));
+          pieces.push(value);
+          cursor = position + token.length;
+        }
+        add(masked.slice(cursor));
+        return pieces;
+      });
+      const translated = [];
+      // Keep the usual request limits and cancellation behavior during recovery.
+      for (let offset = 0; offset < fragments.length;) {
+        const batch = [];
+        let size = 0;
+        while (offset < fragments.length && batch.length < MAX_BATCH_ITEMS) {
+          const fragment = fragments[offset];
+          if (batch.length && size + fragment.length > MAX_BATCH_CHARS) break;
+          batch.push(fragment);
+          size += fragment.length;
+          offset++;
+        }
+        translated.push(...await request(batch, config, signal));
+      }
+      return plans.map(pieces => pieces.map(piece => typeof piece === 'string'
+        ? piece : piece.leading + translated[piece.index] + piece.trailing).join(''));
+    }
+  };
 }

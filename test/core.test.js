@@ -89,3 +89,72 @@ test('abort settles once and ignores a late provider response', async () => {
   await assert.rejects(pending, /暂停/);
   assert.equal(aborted, 1);
 });
+
+test('missing placeholders report preservation failure instead of reordered English', () => {
+  const request = makeRequest(['AとBの説明です。'], 'test');
+  assert.throws(() => parseResponse(envelope([{ id: '0', text: '说明' }]), request.protectedTexts), /未完整保留/);
+});
+
+test('recovers reordered or missing English by translating Japanese spans and stitching originals', async () => {
+  for (const failure of ['reorder', 'missing']) {
+    const bodies = [];
+    const translator = createTranslator(options => {
+      const body = JSON.parse(options.data);
+      const { entries } = JSON.parse(body.messages[1].content);
+      bodies.push(entries);
+      let translations;
+      if (bodies.length === 1) {
+        const tokens = Object.keys(entries[0].protectedEnglish);
+        translations = [{ id: '0', text: failure === 'reorder' ? `${tokens[1]}邮件发送${tokens[0]}。` : '邮件发送详情。' }];
+      } else {
+        const dictionary = { '「詳細」を': '“详情”通过', 'メールで送ります。': '邮件发送。' };
+        translations = entries.map(({ id, text }) => ({ id, text: dictionary[text] }));
+      }
+      queueMicrotask(() => options.onload({ status: 200, responseText: envelope(translations) }));
+      return { abort() {} };
+    });
+    const result = await translator(['those details「詳細」をEメールで送ります。'], { endpoint: 'https://test.example', model: 'llm', key: 'test' });
+    assert.deepEqual(result, ['those details“详情”通过E邮件发送。']);
+    assert.equal(bodies.length, 2);
+    assert.deepEqual(bodies[1].map(x => x.text), ['「詳細」を', 'メールで送ります。']);
+    assert.ok(bodies[1].every(x => Object.keys(x.protectedEnglish).length === 0));
+  }
+});
+
+test('fragment recovery stops on invalid output without retry loops', async () => {
+  let calls = 0;
+  const translator = createTranslator(options => {
+    calls++;
+    queueMicrotask(() => options.onload({ status: 200, responseText: envelope([{ id: '0', text: calls === 1 ? '说明' : 'extra English' }]) }));
+    return { abort() {} };
+  });
+  await assert.rejects(translator(['Aの説明'], { endpoint: 'https://test.example', model: 'llm', key: 'test' }), /额外英语/);
+  assert.equal(calls, 2);
+});
+
+test('fragment recovery batches requests and cancellation prevents further API calls', async () => {
+  for (const cancel of [false, true]) {
+    const controller = new AbortController();
+    let calls = 0;
+    const counts = [];
+    const source = Array.from({ length: 14 }, (_, i) => `A${i}の説明。`).join('');
+    const translator = createTranslator(options => {
+      calls++;
+      const { entries } = JSON.parse(JSON.parse(options.data).messages[1].content);
+      counts.push(entries.length);
+      queueMicrotask(() => {
+        options.onload({ status: 200, responseText: envelope(entries.map(({ id }) => ({ id, text: '说明。' }))) });
+        if (cancel && calls === 2) controller.abort();
+      });
+      return { abort() {} };
+    });
+    const pending = translator([source], { endpoint: 'https://test.example', model: 'llm', key: 'test' }, controller.signal);
+    if (cancel) {
+      await assert.rejects(pending, /暂停/);
+      assert.deepEqual(counts, [1, 12]);
+    } else {
+      assert.deepEqual(await pending, [Array.from({ length: 14 }, (_, i) => `A${i}说明。`).join('')]);
+      assert.deepEqual(counts, [1, 12, 2]);
+    }
+  }
+});
