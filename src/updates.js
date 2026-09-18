@@ -18,7 +18,7 @@ export async function checkForUpdate(gmRequest, current) {
       }, onerror: fail, ontimeout: fail, onabort: fail });
   });
   // The public feed avoids GitHub API's low shared-IP anonymous rate limit.
-  const feed = await get(`https://github.com/${REPOSITORY}/commits/main.atom`);
+  const feed = await get(`https://github.com/${REPOSITORY}/commits/main.atom?check=${Date.now()}`);
   const sha = feed.match(/<entry>\s*<id>tag:github\.com,2008:Grit::Commit\/([a-f0-9]{40})<\/id>/)?.[1];
   if (!/^[a-f0-9]{40}$/.test(sha || '')) throw new Error('无法确认最新版本。');
   const url = `https://raw.githubusercontent.com/${REPOSITORY}/${sha}/dist/abceed-ai-translator.user.js`;

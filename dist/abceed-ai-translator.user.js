@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.6.1
+// @version      1.6.2
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -314,7 +314,7 @@ async function checkForUpdate(gmRequest, current) {
       }, onerror: fail, ontimeout: fail, onabort: fail });
   });
   // The public feed avoids GitHub API's low shared-IP anonymous rate limit.
-  const feed = await get(`https://github.com/${REPOSITORY}/commits/main.atom`);
+  const feed = await get(`https://github.com/${REPOSITORY}/commits/main.atom?check=${Date.now()}`);
   const sha = feed.match(/<entry>\s*<id>tag:github\.com,2008:Grit::Commit\/([a-f0-9]{40})<\/id>/)?.[1];
   if (!/^[a-f0-9]{40}$/.test(sha || '')) throw new Error('无法确认最新版本。');
   const url = `https://raw.githubusercontent.com/${REPOSITORY}/${sha}/dist/abceed-ai-translator.user.js`;
@@ -1193,7 +1193,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.6.1', updateGroup, 'version');
+  el('span', 'v1.6.2', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1201,7 +1201,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.6.1');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.6.2');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;
