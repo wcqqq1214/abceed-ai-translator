@@ -1,19 +1,25 @@
 import { hasJapanese, MAX_TEXT, MAX_BATCH_CHARS, MAX_BATCH_ITEMS, SESSION_BUDGET } from './core.js';
 import { TranslationCache } from './cache.js';
 
-const EXCLUDE = 'script,style,noscript,textarea,input,select,option,code,pre,svg,math,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-abceed-ai-ui]';
+const EXCLUDE = 'script,style,noscript,textarea,input,code,pre,svg,math,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-abceed-ai-ui]';
 
 export function visibleTextNode(node, win) {
-  const element = node.parentElement;
+  const element = node.nodeType === 2 ? node.ownerElement : node.parentElement;
   if (!element || element.closest(EXCLUDE)) return false;
   for (let parent = element; parent; parent = parent.parentElement) {
     if (parent.hidden || parent.getAttribute('aria-hidden') === 'true') return false;
     const style = win.getComputedStyle(parent);
     if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;
   }
-  const range = node.ownerDocument.createRange();
-  range.selectNodeContents(node);
-  return [...range.getClientRects()].some(rect => rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.top <= win.innerHeight && rect.right >= 0 && rect.left <= win.innerWidth);
+  const select = element.closest('select');
+  let rects;
+  if (select || node.nodeType === 2) rects = [(select || element).getBoundingClientRect()];
+  else {
+    const range = node.ownerDocument.createRange();
+    range.selectNodeContents(node);
+    rects = [...range.getClientRects()];
+  }
+  return rects.some(rect => rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.top <= win.innerHeight && rect.right >= 0 && rect.left <= win.innerWidth);
 }
 
 export class TranslationEngine {
@@ -32,7 +38,7 @@ export class TranslationEngine {
 
   attach() {
     this.observer = new this.win.MutationObserver(() => this.schedule());
-    this.observer.observe(this.doc.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'aria-hidden', 'class', 'style'] });
+    this.observer.observe(this.doc.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'aria-hidden', 'class', 'style', 'aria-label', 'label'] });
     this.onScroll = () => this.schedule();
     this.win.addEventListener('scroll', this.onScroll, true);
     this.win.addEventListener('resize', this.onScroll);
@@ -81,11 +87,18 @@ export class TranslationEngine {
     if (wasActive) this.start(config);
   }
 
+  *translationNodes() {
+    const walker = this.doc.createTreeWalker(this.doc.body, this.win.NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) yield walker.currentNode;
+    // Selected tabs render their aria-label through CSS; native menus may use label attributes.
+    for (const element of this.doc.querySelectorAll('[role="tab"][aria-label], option[label], optgroup[label]')) {
+      yield element.getAttributeNode(element.matches('[role="tab"]') ? 'aria-label' : 'label');
+    }
+  }
+
   applyCached() {
     if (!this.active || this.doc.hidden) return;
-    const walker = this.doc.createTreeWalker(this.doc.body, this.win.NodeFilter.SHOW_TEXT);
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
+    for (const node of this.translationNodes()) {
       const source = node.nodeValue;
       if (this.written.get(node) === source || !hasJapanese(source)) continue;
       const cached = this.cache.get(source.trim());
@@ -108,10 +121,14 @@ export class TranslationEngine {
   }
 
   write(node, source, translated) {
-    if (!node.isConnected || node.nodeValue !== source || !this.isVisible(node, this.win)) return;
+    if (!(node.nodeType === 2 ? node.ownerElement?.isConnected : node.isConnected) || node.nodeValue !== source || !this.isVisible(node, this.win)) return;
     const leading = source.match(/^\s*/)[0];
     const trailing = source.match(/\s*$/)[0];
     const value = leading + translated + trailing;
+    const element = node.nodeType === 2 ? node.ownerElement : node.parentElement;
+    const option = element?.closest('option');
+    // Without an explicit value, browsers derive it from the option text.
+    if (option && !option.hasAttribute('value')) option.setAttribute('value', option.value);
     this.written.set(node, value);
     node.nodeValue = value;
     this.count++;
@@ -124,9 +141,7 @@ export class TranslationEngine {
     const groups = new Map();
     const translatedValues = new Set(this.cache.values());
     let size = 0, oversized = 0;
-    const walker = this.doc.createTreeWalker(this.doc.body, this.win.NodeFilter.SHOW_TEXT);
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
+    for (const node of this.translationNodes()) {
       const source = node.nodeValue;
       if (this.written.get(node) === source || !hasJapanese(source) || !this.isVisible(node, this.win)) continue;
       const text = source.trim();

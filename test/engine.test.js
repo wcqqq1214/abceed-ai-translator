@@ -149,3 +149,37 @@ test('clearing cache discards an in-flight result instead of persisting it again
   assert.equal(doc.querySelector('p').textContent, '解説');
   engine.destroy(); dom.window.close();
 });
+
+test('translates native options and selected tab attributes while preserving selection and values', async () => {
+  const seen = [];
+  const { dom, engine, doc } = setup(`<button role="tab" aria-label="学習時間"><span style="visibility:hidden">学習時間</span></button><select><option value="7d">1週間</option><option selected>すべて</option><option value="x" label="1ヶ月">Month</option></select><select hidden><option>秘密</option></select>`, async texts => {
+    seen.push(...texts);
+    const map = { '学習時間': '学习时间', '1週間': '1周', 'すべて': '全部', '1ヶ月': '1个月' };
+    return texts.map(text => map[text]);
+  });
+  const rect = () => ({ width: 80, height: 20, left: 0, right: 80, top: 0, bottom: 20 });
+  doc.querySelector('button').getBoundingClientRect = rect;
+  for (const select of doc.querySelectorAll('select')) select.getBoundingClientRect = rect;
+  const select = doc.querySelector('select');
+  await engine.tick();
+  assert.equal(doc.querySelector('button').getAttribute('aria-label'), '学习时间');
+  assert.equal(select.options[0].text, '1周');
+  assert.equal(select.options[0].value, '7d');
+  assert.equal(select.options[1].text, '全部');
+  assert.equal(select.value, 'すべて');
+  assert.equal(select.selectedIndex, 1);
+  assert.equal(select.options[2].label, '1个月');
+  assert.equal(select.options[2].value, 'x');
+  assert.ok(!seen.includes('秘密'));
+  select.selectedIndex = 0;
+  assert.equal(select.value, '7d');
+  await engine.tick();
+  assert.equal(seen.length, 4);
+  // Framework restores Japanese: the cache must update both types of target.
+  select.options[0].textContent = '1週間';
+  doc.querySelector('button').setAttribute('aria-label', '学習時間');
+  engine.applyCached();
+  assert.equal(select.options[0].text, '1周');
+  assert.equal(doc.querySelector('button').getAttribute('aria-label'), '学习时间');
+  dom.window.close();
+});
