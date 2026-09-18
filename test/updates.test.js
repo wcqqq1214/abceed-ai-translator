@@ -6,7 +6,7 @@ test('update check resolves an immutable installer without sending API credentia
   const requests = [], sha = 'a'.repeat(40);
   const result = await checkForUpdate(options => {
     requests.push(options);
-    queueMicrotask(() => options.onload({ status: 200, responseText: requests.length === 1 ? JSON.stringify([{ sha }]) : '// ==UserScript==\n// @version      1.6.0\n' }));
+    queueMicrotask(() => options.onload({ status: 200, responseText: requests.length === 1 ? `<feed><entry><id>tag:github.com,2008:Grit::Commit/${sha}</id></entry></feed>` : '// ==UserScript==\n// @version      1.6.0\n' }));
   }, '1.5.0');
   assert.equal(result.available, true);
   assert.ok(result.url.includes(`/${sha}/`));

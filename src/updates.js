@@ -11,14 +11,15 @@ export async function checkForUpdate(gmRequest, current) {
   const get = url => new Promise((resolve, reject) => {
     const fail = () => reject(new Error('检查失败，请稍后重试。'));
     gmRequest({ method: 'GET', url, anonymous: true, redirect: 'error', timeout: 10000,
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/atom+xml, text/plain, */*' },
       onload: response => {
         if (response.status !== 200 || typeof response.responseText !== 'string' || response.responseText.length > 500000) { fail(); return; }
         resolve(response.responseText);
       }, onerror: fail, ontimeout: fail, onabort: fail });
   });
-  const commits = JSON.parse(await get(`https://api.github.com/repos/${REPOSITORY}/commits?path=dist%2Fabceed-ai-translator.user.js&per_page=1`));
-  const sha = commits?.[0]?.sha;
+  // The public feed avoids GitHub API's low shared-IP anonymous rate limit.
+  const feed = await get(`https://github.com/${REPOSITORY}/commits/main.atom`);
+  const sha = feed.match(/<entry>\s*<id>tag:github\.com,2008:Grit::Commit\/([a-f0-9]{40})<\/id>/)?.[1];
   if (!/^[a-f0-9]{40}$/.test(sha || '')) throw new Error('无法确认最新版本。');
   const url = `https://raw.githubusercontent.com/${REPOSITORY}/${sha}/dist/abceed-ai-translator.user.js`;
   const script = await get(url);

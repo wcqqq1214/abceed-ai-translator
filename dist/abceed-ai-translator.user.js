@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.6.0
+// @version      1.6.1
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -307,14 +307,15 @@ async function checkForUpdate(gmRequest, current) {
   const get = url => new Promise((resolve, reject) => {
     const fail = () => reject(new Error('检查失败，请稍后重试。'));
     gmRequest({ method: 'GET', url, anonymous: true, redirect: 'error', timeout: 10000,
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/atom+xml, text/plain, */*' },
       onload: response => {
         if (response.status !== 200 || typeof response.responseText !== 'string' || response.responseText.length > 500000) { fail(); return; }
         resolve(response.responseText);
       }, onerror: fail, ontimeout: fail, onabort: fail });
   });
-  const commits = JSON.parse(await get(`https://api.github.com/repos/${REPOSITORY}/commits?path=dist%2Fabceed-ai-translator.user.js&per_page=1`));
-  const sha = commits?.[0]?.sha;
+  // The public feed avoids GitHub API's low shared-IP anonymous rate limit.
+  const feed = await get(`https://github.com/${REPOSITORY}/commits/main.atom`);
+  const sha = feed.match(/<entry>\s*<id>tag:github\.com,2008:Grit::Commit\/([a-f0-9]{40})<\/id>/)?.[1];
   if (!/^[a-f0-9]{40}$/.test(sha || '')) throw new Error('无法确认最新版本。');
   const url = `https://raw.githubusercontent.com/${REPOSITORY}/${sha}/dist/abceed-ai-translator.user.js`;
   const script = await get(url);
@@ -1192,7 +1193,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.6.0', updateGroup, 'version');
+  el('span', 'v1.6.1', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1200,7 +1201,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.6.0');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.6.1');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;
