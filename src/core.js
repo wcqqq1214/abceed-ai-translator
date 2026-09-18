@@ -102,6 +102,10 @@ export function parseResponse(raw, protectedTexts) {
 export function createTranslator(gmRequest) {
   return (texts, config, signal) => new Promise((resolve, reject) => {
     const { protectedTexts, body } = makeRequest(texts, config.model);
+    // DeepSeek enables thinking by default; translation prioritizes response speed.
+    if (new URL(config.endpoint).hostname === 'api.deepseek.com') {
+      body.thinking = { type: 'disabled' };
+    }
     let handle, timer, settled = false;
     const finish = (error, value) => {
       if (settled) return;

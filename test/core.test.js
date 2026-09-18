@@ -53,8 +53,21 @@ test('transport calls only configured AI endpoint, omits cookies and rejects red
   assert.equal(request.anonymous, true);
   assert.equal(request.redirect, 'error');
   assert.equal(JSON.parse(request.data).model, 'my-llm');
+  assert.equal(JSON.parse(request.data).thinking, undefined);
   assert.equal(request.headers.Authorization, 'Bearer test-only-key');
   assert.equal(request.url, 'https://test.example/v1/chat/completions');
+});
+test('disables thinking for DeepSeek official endpoints only', async () => {
+  for (const endpoint of ['https://api.deepseek.com/chat/completions', 'https://api.deepseek.com/v1/chat/completions', 'https://api.deepseek.com.other.example/chat/completions']) {
+    let body;
+    const translator = createTranslator(options => {
+      body = JSON.parse(options.data);
+      queueMicrotask(() => options.onload({ status: 200, responseText: envelope([{ id: '0', text: '解析' }]) }));
+      return { abort() {} };
+    });
+    await translator(['解説'], { endpoint, model: 'deepseek-flash', key: 'test-only-key' });
+    assert.deepEqual(body.thinking, new URL(endpoint).hostname === 'api.deepseek.com' ? { type: 'disabled' } : undefined);
+  }
 });
 test('HTTP failures never retry, echo server content or fall back to machine translation', async () => {
   let calls = 0;

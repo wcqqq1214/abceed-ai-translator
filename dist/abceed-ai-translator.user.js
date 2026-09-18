@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.0.0
+// @version      1.0.1
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -127,6 +127,10 @@ function parseResponse(raw, protectedTexts) {
 function createTranslator(gmRequest) {
   return (texts, config, signal) => new Promise((resolve, reject) => {
     const { protectedTexts, body } = makeRequest(texts, config.model);
+    // DeepSeek enables thinking by default; translation prioritizes response speed.
+    if (new URL(config.endpoint).hostname === 'api.deepseek.com') {
+      body.thinking = { type: 'disabled' };
+    }
     let handle, timer, settled = false;
     const finish = (error, value) => {
       if (settled) return;
