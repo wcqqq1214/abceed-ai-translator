@@ -91,7 +91,7 @@ test('formats cached Chinese part-of-speech labels without changing definitions'
   cache.load(`${config.endpoint}\n${config.model}`);
   cache.set('word', '名词：词；动词：措辞');
   await words.lookup('word', 100, 100);
-  assert.equal(words.meaning.textContent, 'n. 词；v. 措辞');
+  assert.deepEqual([...words.meaning.querySelectorAll('.meaning-row')].map(row => row.textContent), ['n. 词', 'v. 措辞']);
   assert.equal(calls, 0);
   words.destroy(); dom.window.close();
 });
@@ -243,5 +243,17 @@ test('replacing selected question content closes popup even without URL change',
   p.textContent = 'next question';
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(words.popup.hidden, true);
+  words.destroy(); dom.window.close();
+});
+
+
+test('dictionary typography separates parts of speech and sentence translations stay plain', () => {
+  const { dom, words } = setup(async () => '');
+  words.renderMeaning('n. 实践；经验；v. 练习', 'word');
+  assert.deepEqual([...words.meaning.querySelectorAll('.meaning-pos')].map(node => node.textContent), ['n.', 'v.']);
+  assert.deepEqual([...words.meaning.querySelectorAll('.meaning-row')].map(node => node.textContent), ['n. 实践；经验', 'v. 练习']);
+  words.renderMeaning('<img src=x>；n. 原句', 'selection');
+  assert.equal(words.meaning.children.length, 0);
+  assert.equal(words.meaning.textContent, '<img src=x>；n. 原句');
   words.destroy(); dom.window.close();
 });

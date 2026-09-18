@@ -112,7 +112,7 @@ export class WordLookup {
     Object.assign(this, { doc, win, root, getConfig, translate, translateSelection, cache });
     this.generation = 0;
     const style = doc.createElement('style');
-    style.textContent = `.word-popup{position:fixed;width:min(280px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:15px 17px;background:#fff;border:1px solid #e7e8ed;border-radius:14px;box-shadow:0 8px 30px #17203322;color:#333946;text-align:left}.word-heading{display:flex;align-items:center;gap:12px}.word-title{flex:1;font-size:16px;font-weight:600;overflow-wrap:anywhere}.word-close{border:0;background:none;color:#858d99;font-size:19px;padding:0 3px}.word-meaning{margin-top:8px;font-size:13px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}`;
+    style.textContent = `.word-popup{position:fixed;box-sizing:border-box;width:max-content;min-width:min(200px,calc(100vw - 24px));max-width:min(320px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:14px 16px;background:#fff;border:1px solid #e9eaed;border-radius:14px;box-shadow:0 4px 18px #17203312,0 1px 3px #17203308;color:#343a43;text-align:left;font:400 14px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;scrollbar-width:thin}.word-popup[data-mode=selection]{max-width:min(420px,calc(100vw - 24px))}.word-heading{display:flex;align-items:center;gap:16px}.word-title{flex:1;font-size:17px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}.word-popup[data-mode=selection] .word-title{font-size:11px;font-weight:400;letter-spacing:.03em;color:#9097a1}.word-close{display:grid;place-items:center;flex:none;width:22px;height:22px;border:0;border-radius:6px;background:none;color:#9aa1aa;font:400 18px/1 sans-serif;padding:0;cursor:pointer}.word-close:hover{background:#f4f5f7;color:#505966}.word-close:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-meaning{margin:8px 0 0;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.meaning-row{display:block}.meaning-row+.meaning-row{margin-top:5px}.meaning-pos{color:#929aa5;font-size:12px}.word-popup[data-loading=true] .word-meaning{font-size:12px;color:#929aa5}`;
     root.append(style);
     this.popup = doc.createElement('section');
     this.popup.className = 'word-popup';
@@ -182,6 +182,22 @@ export class WordLookup {
     this.popup.style.maxHeight = `${placement.maxHeight}px`;
   }
 
+  renderMeaning(text, mode) {
+    this.popup.dataset.loading = 'false';
+    this.meaning.replaceChildren();
+    const formatted = mode === 'word' ? formatWordMeaning(text) : text;
+    const pos = /^(\s*)((?:modal v|n|v|vt|vi|adj|adv|pron|prep|conj|art|interj|num|aux)\.)(\s*)([\s\S]*)$/;
+    const rows = mode === 'word' ? formatted.split(/[；;\n]+(?=\s*(?:modal v|n|v|vt|vi|adj|adv|pron|prep|conj|art|interj|num|aux)\.)/) : [formatted];
+    for (const row of rows) {
+      const match = mode === 'word' && row.match(pos);
+      if (!match) { this.meaning.append(this.doc.createTextNode(row)); continue; }
+      const line = this.doc.createElement('span'); line.className = 'meaning-row';
+      const label = this.doc.createElement('span'); label.className = 'meaning-pos'; label.textContent = match[2];
+      line.append(label, this.doc.createTextNode(' ' + match[4]));
+      this.meaning.append(line);
+    }
+  }
+
   async lookup(word, x, y, mode = 'word', anchor) {
     this.hide();
     const generation = this.generation;
@@ -192,6 +208,8 @@ export class WordLookup {
       ? selection.getRangeAt(0).commonAncestorContainer : undefined;
     this.sourceText = this.sourceNode?.textContent;
     this.popup.hidden = false;
+    this.popup.dataset.mode = mode;
+    this.popup.dataset.loading = 'true';
     this.title.textContent = mode === 'selection' ? '划选翻译' : word;
     this.meaning.hidden = false;
     this.meaning.textContent = mode === 'selection' ? 'AI 正在翻译…' : 'AI 正在查询…';
@@ -201,19 +219,19 @@ export class WordLookup {
       const scope = `${config.endpoint}\n${config.model}`;
       if (scope !== this.cache.scope) this.cache.load(scope);
       const cacheKey = mode === 'selection' ? `selection:${word}` : word;
-      const format = mode === 'selection' ? text => text : formatWordMeaning;
       const cached = this.cache.get(cacheKey);
-      if (cached !== undefined) { this.meaning.textContent = format(cached); this.position(x, y, anchor); return; }
+      if (cached !== undefined) { this.renderMeaning(cached, mode); this.position(x, y, anchor); return; }
       this.controller = new AbortController();
       const meaning = await (mode === 'selection' ? this.translateSelection : this.translate)(word, config, this.controller.signal);
       if (generation !== this.generation) return;
       if (url !== this.win.location.href) { this.hide(); return; }
       this.cache.set(cacheKey, meaning);
       this.cache.flush();
-      this.meaning.textContent = format(meaning);
+      this.renderMeaning(meaning, mode);
     } catch (error) {
       if (generation !== this.generation) return;
       if (url !== this.win.location.href) { this.hide(); return; }
+      this.popup.dataset.loading = 'false';
       this.meaning.textContent = error.message;
     }
     this.position(x, y, anchor);
