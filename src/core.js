@@ -68,7 +68,13 @@ export function makeRequest(texts, model) {
   };
 }
 
-export function parseResponse(raw, protectedTexts, partial = false) {
+function makeRecoveryRequest(texts, model, reason) {
+  const request = makeRequest(texts, model);
+  request.body.messages[0].content += ` 上一次输出未通过校验：${reason} 请从原文重新翻译并修正这一问题。日文中的人名、品牌名和片假名请用中文译名或中文音译，不能转写成拉丁字母，也不能残留假名。数字占位符也必须保留，不可改成汉字数字、合并或省略重复数字；例如“1杯1杯”中的两个占位符都要保留。提交前逐个核对占位符数量及顺序。`;
+  return request;
+}
+
+export function parseResponse(raw, protectedTexts, partial = false, onInvalid = () => {}) {
   if (typeof raw !== 'string' || raw.length > 300000) throw new TranslationResponseError('AI 响应为空或过大。');
   let envelope, result;
   try {
@@ -103,7 +109,10 @@ export function parseResponse(raw, protectedTexts, partial = false) {
         previous = position;
       }
       return restored;
-    } catch (error) { if (partial && error instanceof TranslationResponseError) return null; throw error; }
+    } catch (error) {
+      if (partial && error instanceof TranslationResponseError) { onInvalid(index, error.message); return null; }
+      throw error;
+    }
   });
 }
 
@@ -156,14 +165,17 @@ export function createRequestTranslator(gmRequest, buildRequest = makeRequest, p
 }
 
 
-export function createTranslator(gmRequest) {
-  const request = createRequestTranslator(gmRequest);
+export function createTranslator(gmRequest, recoveryReason = '') {
+  const request = createRequestTranslator(gmRequest, recoveryReason
+    ? (texts, model) => makeRecoveryRequest(texts, model, recoveryReason) : makeRequest);
   return async (texts, config, signal) => {
     try { return await request(texts, config, signal); }
     catch (error) {
       if (!(error instanceof EnglishProtectionError) || signal?.aborted) throw error;
       // One bounded recovery pass: the model cannot move or remove English because
       // only Japanese spans are translated; original English is stitched in locally.
+      const recoverFragments = createRequestTranslator(gmRequest,
+        (texts, model) => makeRecoveryRequest(texts, model, error.message));
       const fragments = [];
       const plans = texts.map(text => {
         const { masked, values } = protectEnglish(text);
@@ -196,7 +208,7 @@ export function createTranslator(gmRequest) {
           size += fragment.length;
           offset++;
         }
-        translated.push(...await request(batch, config, signal));
+        translated.push(...await recoverFragments(batch, config, signal));
       }
       return plans.map(pieces => pieces.map(piece => typeof piece === 'string'
         ? piece : piece.leading + translated[piece.index] + piece.trailing).join(''));
@@ -207,9 +219,11 @@ export function createTranslator(gmRequest) {
 
 // Keep valid results when a model mishandles one entry. Transport failures still stop the batch.
 export function createPageTranslator(gmRequest) {
-  const request = createRequestTranslator(gmRequest, makeRequest, (raw, parts) => parseResponse(raw, parts, true));
-  const recover = createTranslator(gmRequest);
   return async (texts, config, signal) => {
+    // Keep diagnostics local: parent and frame batches can run concurrently.
+    const reasons = new Map();
+    const request = createRequestTranslator(gmRequest, makeRequest, (raw, parts) =>
+      parseResponse(raw, parts, true, (index, reason) => reasons.set(index, reason)));
     let results;
     try { results = await request(texts, config, signal); }
     catch (error) {
@@ -219,7 +233,10 @@ export function createPageTranslator(gmRequest) {
     }
     for (let index = 0; index < results.length; index++) {
       if (results[index] !== null) continue;
-      try { results[index] = (await recover([texts[index]], config, signal))[0]; }
+      try {
+        const recover = createTranslator(gmRequest, reasons.get(index));
+        results[index] = (await recover([texts[index]], config, signal))[0];
+      }
       catch (error) { if (!(error instanceof TranslationResponseError) || signal?.aborted) throw error; }
     }
     return results;

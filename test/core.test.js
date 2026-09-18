@@ -177,3 +177,35 @@ test('page translator keeps successful entries and bounds failed-entry recovery'
   assert.deepEqual(await translate(['解説', 'Aの説明', '次の問題'], { endpoint: 'https://test.example', model: 'test', key: 'test' }), ['解析', null, '下一题']);
   assert.equal(calls, 3);
 });
+
+test('embedded paragraph recovery identifies validation failure and preserves repeated numbers', async () => {
+  const { createPageTranslator } = await import('../src/core.js');
+  const source = 'この度はセルッティ社製コーヒーメーカーをお買い求めいただき、ありがとうございました。コーヒーメーカー製造実績80年を超す当社は、お召し上がりになる1杯1杯がお客様に大きな喜びをもたらすと確信しています。';
+  const config = { endpoint: 'https://test.example', model: 'test', key: 'test' };
+  for (const failure of ['brand', 'number', 'kana']) {
+    const bodies = [];
+    const translate = createPageTranslator(options => {
+      const body = JSON.parse(options.data);
+      bodies.push(body);
+      const { entries } = JSON.parse(body.messages[1].content);
+      const tokens = Object.keys(entries[0].protectedEnglish);
+      let text = `感谢您购买塞尔蒂咖啡机。我们有超过${tokens[0]}年的制造经验，相信您喝的${tokens[1]}杯${tokens[2]}杯咖啡都会带来喜悦。`;
+      if (bodies.length === 1) {
+        if (failure === 'brand') text = text.replace('塞尔蒂', 'Cerrutti');
+        if (failure === 'number') text = text.replace(tokens[2], '一');
+        if (failure === 'kana') text = text.replace('塞尔蒂', 'セルッティ');
+      } else {
+        const prompt = body.messages[0].content;
+        assert.match(prompt, /上一次输出未通过校验/);
+        assert.match(prompt, failure === 'number' ? /未完整保留/ : /额外英语/);
+        assert.match(prompt, /中文音译/);
+        assert.match(prompt, /省略重复数字/);
+        assert.equal(entries[0].text, protectEnglish(source).masked);
+      }
+      queueMicrotask(() => options.onload({ status: 200, responseText: envelope([{ id: '0', text }]) }));
+      return { abort() {} };
+    });
+    assert.deepEqual(await translate([source], config), ['感谢您购买塞尔蒂咖啡机。我们有超过80年的制造经验，相信您喝的1杯1杯咖啡都会带来喜悦。']);
+    assert.equal(bodies.length, 2);
+  }
+});
