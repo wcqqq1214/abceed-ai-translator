@@ -68,3 +68,11 @@ test('malformed storage and write failures do not break in-memory translation', 
   cache.load('test'); assert.deepEqual(cache.values(), []);
   cache.set('解説', '解析'); cache.flush(); assert.equal(cache.get('解説'), '解析');
 });
+
+test('cache scopes version translation policies independently of application releases', async () => {
+  const { translationScope, wordCacheKey } = await import('../src/cache.js');
+  const config = { endpoint: 'https://test.example', model: 'test', version: '1.0.0' };
+  assert.equal(translationScope(config), 'https://test.example\ntest');
+  assert.equal(translationScope(config, 'word'), translationScope({ ...config, version: '9.0.0' }, 'word'));
+  assert.notEqual(wordCacheKey('charge', 'charge a fee'), wordCacheKey('charge', 'charge a battery'));
+});

@@ -158,3 +158,22 @@ test('fragment recovery batches requests and cancellation prevents further API c
     }
   }
 });
+
+test('partial parsing preserves valid items when another item is missing or duplicated', () => {
+  const { protectedTexts } = makeRequest(['解説', '問題'], 'test');
+  assert.deepEqual(parseResponse(envelope([{ id: '0', text: '解析' }]), protectedTexts, true), ['解析', null]);
+  assert.deepEqual(parseResponse(envelope([{ id: '0', text: '解析' }, { id: '1', text: '题目' }, { id: '1', text: '重复' }]), protectedTexts, true), ['解析', null]);
+});
+
+test('page translator keeps successful entries and bounds failed-entry recovery', async () => {
+  const { createPageTranslator } = await import('../src/core.js');
+  let calls = 0;
+  const translate = createPageTranslator(options => {
+    calls++;
+    const translations = calls === 1 ? [{ id: '0', text: '解析' }, { id: '1', text: 'bad English' }, { id: '2', text: '下一题' }] : [{ id: '0', text: 'bad English' }];
+    queueMicrotask(() => options.onload({ status: 200, responseText: envelope(translations) }));
+    return { abort() {} };
+  });
+  assert.deepEqual(await translate(['解説', 'Aの説明', '次の問題'], { endpoint: 'https://test.example', model: 'test', key: 'test' }), ['解析', null, '下一题']);
+  assert.equal(calls, 3);
+});

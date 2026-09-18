@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { selectedEnglishWord, createWordTranslator, WordLookup, formatWordMeaning, selectedEnglishText, createSelectionTranslator, selectionPopupPosition } from '../src/words.js';
-import { TranslationCache } from '../src/cache.js';
+import { selectedEnglishWord, createWordTranslator, WordLookup, formatWordMeaning, selectedEnglishText, createSelectionTranslator, selectionPopupPosition, selectedWordContext } from '../src/words.js';
+import { TranslationCache, translationScope, wordCacheKey } from '../src/cache.js';
 
 const config = { endpoint: 'https://api.deepseek.com/chat/completions', model: 'test', key: 'test-only' };
 const envelope = meaning => JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ meaning }) } }] });
@@ -88,7 +88,7 @@ test('formats cached Chinese part-of-speech labels without changing definitions'
   assert.equal(formatWordMeaning('n. 表示动词的名词'), 'n. 表示动词的名词');
   let calls = 0;
   const { dom, words, cache } = setup(async () => { calls++; return ''; });
-  cache.load(`${config.endpoint}\n${config.model}`);
+  cache.load(translationScope(config, 'word'));
   cache.set('word', '名词：词；动词：措辞');
   await words.lookup('word', 100, 100);
   assert.deepEqual([...words.meaning.querySelectorAll('.meaning-row')].map(row => row.textContent), ['n. 词', 'v. 措辞']);
@@ -256,4 +256,34 @@ test('dictionary typography separates parts of speech and sentence translations 
   assert.equal(words.meaning.children.length, 0);
   assert.equal(words.meaning.textContent, '<img src=x>；n. 原句');
   words.destroy(); dom.window.close();
+});
+
+
+test('word context is limited to nearby prose and forwarded to the model', async () => {
+  const dom = new JSDOM('<p id="context">We need to <b>charge</b> the battery.</p><p>Unrelated private content.</p>');
+  try {
+    const doc = dom.window.document, word = doc.querySelector('b');
+    const range = doc.createRange(); range.selectNodeContents(word);
+    doc.getSelection().addRange(range);
+    const context = selectedWordContext(doc);
+    assert.equal(context, 'We need to charge the battery.');
+    let entry;
+    const translate = createWordTranslator(options => {
+      entry = JSON.parse(JSON.parse(options.data).messages[1].content);
+      queueMicrotask(() => options.onload({ status: 200, responseText: envelope('v. 充电') }));
+      return { abort() {} };
+    });
+    await translate('charge', config, undefined, context);
+    assert.deepEqual(entry, { word: 'charge', context });
+    doc.querySelector('#context').append(doc.createElement('input'));
+    assert.equal(selectedWordContext(doc), '');
+  } finally { dom.window.close(); }
+});
+
+test('tight embedded viewports use side space and full-screen selections remain readable', () => {
+  const side = selectionPopupPosition({ left: 100, right: 300, top: 15, bottom: 180 }, 280, 160, 800, 210);
+  assert.equal(side.left, 310);
+  assert.equal(side.maxWidth, 280);
+  const full = selectionPopupPosition({ left: 0, right: 340, top: 0, bottom: 180 }, 280, 160, 340, 180);
+  assert.ok(full.top >= 0 && full.top + full.maxHeight <= 180);
 });

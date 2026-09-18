@@ -1,3 +1,14 @@
+// Revisions describe translation behavior, not extension releases. Cosmetic updates keep caches.
+export const PAGE_TRANSLATION_REVISION = 1;
+export const WORD_TRANSLATION_REVISION = 2;
+export function translationScope(config, kind = 'page') {
+  const base = `${config.endpoint}\n${config.model}`;
+  if (kind === 'word') return `${base}\nword-v${WORD_TRANSLATION_REVISION}`;
+  // Keep the existing Japanese cache while its translation policy is unchanged.
+  return PAGE_TRANSLATION_REVISION === 1 ? base : `${base}\npage-v${PAGE_TRANSLATION_REVISION}`;
+}
+export const wordCacheKey = (word, context = '') => context ? `context:${JSON.stringify([word, context])}` : word;
+
 const CACHE_LIMIT = 1000;
 const CACHE_CHAR_LIMIT = 1000000;
 

@@ -113,3 +113,36 @@ test('embedded Japanese translates in place while English stays intact and paren
   assert.equal(automatic.engine.active, true);
   automatic.destroy(); dom.window.close();
 });
+
+test('frame word lookup forwards context and separates cached meanings by sentence', async () => {
+  const dom = new JSDOM('<iframe></iframe>', { url: 'https://app.abceed.com' });
+  const win = dom.window, doc = win.document, source = doc.querySelector('iframe').contentWindow;
+  const contexts = [], replies = [];
+  source.postMessage = data => replies.push(data);
+  const bridge = attachFrameBridge({ win, doc, getConfig: () => config, cache: new TranslationCache(),
+    translate: async (word, config, signal, context) => { contexts.push(context); return context.includes('battery') ? 'v. 充电' : 'v. 收费'; } });
+  try {
+    const send = context => win.dispatchEvent(new win.MessageEvent('message', { origin, source, data: { channel, id: String(replies.length), type: 'request', mode: 'word', text: 'charge', context } }));
+    send('charge the battery'); await wait();
+    send('charge a fee'); await wait();
+    send('charge the battery'); await wait();
+    assert.deepEqual(contexts, ['charge the battery', 'charge a fee']);
+    assert.deepEqual(replies.map(reply => reply.result), ['v. 充电', 'v. 收费', 'v. 充电']);
+  } finally { bridge.destroy(); dom.window.close(); }
+});
+
+test('partial iframe failures preserve valid cache entries and are returned as retryable nulls', async () => {
+  const dom = new JSDOM('<iframe></iframe>', { url: 'https://app.abceed.com' });
+  const win = dom.window, doc = win.document, source = doc.querySelector('iframe').contentWindow;
+  const replies = []; source.postMessage = data => replies.push(data);
+  const engine = { active: true, generation: 1, config, used: 0, budget: 50000, failed: new Set(), cache: new TranslationCache(), translate: async () => ['解析', null] };
+  const bridge = attachAutoFrameBridge({ win, doc, engine });
+  try {
+    win.dispatchEvent(new win.MessageEvent('message', { origin, source, data: { channel, id: 'partial', type: 'request', mode: 'auto', text: ['解説', '問題'] } }));
+    await wait();
+    assert.deepEqual(replies[0].result, ['解析', null]);
+    assert.equal(engine.cache.get('解説'), '解析');
+    assert.equal(engine.cache.get('問題'), undefined);
+    assert.ok(engine.failed.has('問題'));
+  } finally { bridge.destroy(); dom.window.close(); }
+});

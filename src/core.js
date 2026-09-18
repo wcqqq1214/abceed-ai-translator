@@ -33,7 +33,8 @@ export function protectEnglish(text) {
   return { masked, values };
 }
 
-class EnglishProtectionError extends Error {}
+export class TranslationResponseError extends Error {}
+class EnglishProtectionError extends TranslationResponseError {}
 
 export function restoreEnglish(translated, protectedText) {
   let remaining = translated;
@@ -67,38 +68,42 @@ export function makeRequest(texts, model) {
   };
 }
 
-export function parseResponse(raw, protectedTexts) {
-  if (typeof raw !== 'string' || raw.length > 300000) throw new Error('AI 响应为空或过大。');
+export function parseResponse(raw, protectedTexts, partial = false) {
+  if (typeof raw !== 'string' || raw.length > 300000) throw new TranslationResponseError('AI 响应为空或过大。');
   let envelope, result;
   try {
     envelope = JSON.parse(raw);
     const choice = envelope.choices?.[0];
-    if (choice?.finish_reason === 'length') throw new Error();
+    if (choice?.finish_reason === 'length') throw new TranslationResponseError();
     const content = choice?.message?.content;
-    if (typeof content !== 'string') throw new Error();
+    if (typeof content !== 'string') throw new TranslationResponseError();
     result = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
-  } catch { throw new Error('AI 未返回完整的翻译 JSON；请重试或更换模型。'); }
+  } catch { throw new TranslationResponseError('AI 未返回完整的翻译 JSON；请重试或更换模型。'); }
   const items = result?.translations;
-  if (!Array.isArray(items) || items.length !== protectedTexts.length) throw new Error('AI 返回的译文数量不正确。');
+  if (!Array.isArray(items) || (!partial && items.length !== protectedTexts.length)) throw new TranslationResponseError('AI 返回的译文数量不正确。');
   const byId = new Map();
+  const invalidIds = new Set();
   for (const item of items) {
     if (!item || typeof item.id !== 'string' || byId.has(item.id) || typeof item.text !== 'string' || !item.text.trim() || item.text.length > MAX_TEXT * 3) {
-      throw new Error('AI 返回的翻译格式不正确。');
+      if (partial) { if (typeof item?.id === 'string') invalidIds.add(item.id); continue; }
+      throw new TranslationResponseError('AI 返回的翻译格式不正确。');
     }
     byId.set(item.id, item.text);
   }
   return protectedTexts.map((part, index) => {
-    if (!byId.has(String(index))) throw new Error('AI 返回的译文 ID 不正确。');
-    const output = byId.get(String(index)).trim();
-    const restored = restoreEnglish(output, part);
-    // Reject reordered placeholders too; the English exercise must remain unchanged.
-    let previous = -1;
-    for (const { token } of part.values) {
-      const position = output.indexOf(token);
-      if (position <= previous) throw new EnglishProtectionError('AI 改变了英语内容的顺序，已停止替换。');
-      previous = position;
-    }
-    return restored;
+    try {
+      if (invalidIds.has(String(index)) || !byId.has(String(index))) throw new TranslationResponseError('AI 返回的译文 ID 不正确。');
+      const output = byId.get(String(index)).trim();
+      const restored = restoreEnglish(output, part);
+      // Reject reordered placeholders too; the English exercise must remain unchanged.
+      let previous = -1;
+      for (const { token } of part.values) {
+        const position = output.indexOf(token);
+        if (position <= previous) throw new EnglishProtectionError('AI 改变了英语内容的顺序，已停止替换。');
+        previous = position;
+      }
+      return restored;
+    } catch (error) { if (partial && error instanceof TranslationResponseError) return null; throw error; }
   });
 }
 
@@ -196,5 +201,27 @@ export function createTranslator(gmRequest) {
       return plans.map(pieces => pieces.map(piece => typeof piece === 'string'
         ? piece : piece.leading + translated[piece.index] + piece.trailing).join(''));
     }
+  };
+}
+
+
+// Keep valid results when a model mishandles one entry. Transport failures still stop the batch.
+export function createPageTranslator(gmRequest) {
+  const request = createRequestTranslator(gmRequest, makeRequest, (raw, parts) => parseResponse(raw, parts, true));
+  const recover = createTranslator(gmRequest);
+  return async (texts, config, signal) => {
+    let results;
+    try { results = await request(texts, config, signal); }
+    catch (error) {
+      if (!(error instanceof TranslationResponseError)) throw error;
+      // Malformed whole responses are left for explicit retry, avoiding a burst of requests.
+      return texts.map(() => null);
+    }
+    for (let index = 0; index < results.length; index++) {
+      if (results[index] !== null) continue;
+      try { results[index] = (await recover([texts[index]], config, signal))[0]; }
+      catch (error) { if (!(error instanceof TranslationResponseError) || signal?.aborted) throw error; }
+    }
+    return results;
   };
 }

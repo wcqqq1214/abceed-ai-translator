@@ -26,9 +26,9 @@ const header = `// ==UserScript==
 // @updateURL    ${raw}
 // ==/UserScript==
 `;
-const sources = await Promise.all(['core', 'cache', 'engine', 'words', 'frames', 'main'].map(async name => {
+const sources = await Promise.all(['core', 'scheduler', 'updates', 'cache', 'engine', 'words', 'frames', 'main'].map(async name => {
   const source = await readFile(new URL(`src/${name}.js`, project), 'utf8');
-  return source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+  return source.replaceAll('__ABCEED_VERSION__', pkg.version).replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
 }));
 await mkdir(new URL('dist/', project), { recursive: true });
 await writeFile(new URL('dist/abceed-ai-translator.user.js', project), `${header}\n(() => {\n'use strict';\n${sources.join('\n')}\n})();\n`);

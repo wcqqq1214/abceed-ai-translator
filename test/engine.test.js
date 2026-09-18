@@ -183,3 +183,22 @@ test('translates native options and selected tab attributes while preserving sel
   assert.equal(doc.querySelector('button').getAttribute('aria-label'), '学习时间');
   dom.window.close();
 });
+
+test('failed entries are skipped without repeated requests and explicit retry recovers them', async () => {
+  let calls = 0;
+  const { dom, engine, doc } = setup('<p id="good">解説</p><p id="bad">問題</p>', async texts => {
+    calls++;
+    return texts.map(text => text === '解説' ? '解析' : calls === 1 ? null : '题目');
+  });
+  try {
+    await engine.tick();
+    assert.equal(engine.active, true);
+    assert.equal(doc.querySelector('#good').textContent, '解析');
+    assert.equal(doc.querySelector('#bad').textContent, '問題');
+    assert.equal(engine.cache.get('問題'), undefined);
+    await engine.tick(); assert.equal(calls, 1);
+    engine.retryFailed(); await engine.tick();
+    assert.equal(doc.querySelector('#bad').textContent, '题目');
+    assert.equal(calls, 2);
+  } finally { dom.window.close(); }
+});

@@ -1,5 +1,7 @@
+import { RequestScheduler } from './scheduler.js';
+import { checkForUpdate } from './updates.js';
 import { attachFrameBridge, attachContentLookup, attachAutoFrameBridge } from './frames.js';
-import { normalizeConfig, createTranslator } from './core.js';
+import { normalizeConfig, createPageTranslator } from './core.js';
 import { TranslationEngine } from './engine.js';
 import { TranslationCache } from './cache.js';
 import { WordLookup, createWordTranslator, createSelectionTranslator } from './words.js';
@@ -33,7 +35,8 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
     input:not([type=checkbox]){display:block;width:100%;height:38px;padding:8px 11px;border:1px solid #e4e6ec;border-radius:9px;background:#fcfcfd;color:#333946;font-size:13px;outline:none;transition:border .15s,box-shadow .15s}input:not([type=checkbox]):focus{border-color:#ee8da0;box-shadow:0 0 0 3px #fdf0f3;background:#fff}input::placeholder{color:#b0b5bf}.field-hint{font-size:11px;color:#858d99;margin-top:5px;line-height:1.6}
     .check{display:flex;align-items:center;gap:7px;margin:12px 0 15px;font-size:12px;font-weight:400;color:#737c89;cursor:pointer}.check input{appearance:auto;accent-color:#e74764;width:13px;height:13px;margin:0}
     .actions{display:flex;gap:8px}.actions button{height:39px;white-space:nowrap;border:1px solid #e4e6ec;border-radius:9px;padding:0 10px;background:#fff;color:#667080;font-size:13px;font-weight:500}.actions button:hover{background:#f7f8fa}.actions .primary{flex:1;background:#e74764;color:#fff;border-color:#e74764;box-shadow:0 3px 7px #e7476414}.actions .primary:hover{background:#d73b57;border-color:#d73b57}
-    .control-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.control-state{font-size:11px;color:#7d8792;margin-top:3px}.auto-switch{position:relative;flex:none;width:34px;height:20px;border:0;border-radius:12px;background:#c8cdd4;padding:0}.auto-switch::after{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0002;transition:transform .15s}.auto-switch[aria-checked=true]{background:#27a779}.auto-switch[aria-checked=true]::after{transform:translateX(14px)}.manual-hint{font-size:11px;color:#929aa5;line-height:1.6;margin:0 1px 13px}.connection{border-top:1px solid #eef0f3}.connection summary{display:flex;align-items:center;justify-content:space-between;padding:12px 0;cursor:pointer;list-style:none;color:#667080;font-size:12px}.connection summary::-webkit-details-marker{display:none}.connection summary::after{content:"⌄";font-size:15px;color:#9aa1aa}.connection[open] summary::after{transform:rotate(180deg)}.connection-body{padding-bottom:13px}.cache-footer{display:flex;justify-content:flex-end;border-top:1px solid #eef0f3;padding-top:10px}.cache-clear{border:0;background:none;padding:3px 0;font-size:11px;color:#949ba5}.cache-clear:hover{color:#d73b57}
+    .control-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.control-state{font-size:11px;color:#7d8792;margin-top:3px}.auto-switch{position:relative;flex:none;width:34px;height:20px;border:0;border-radius:12px;background:#c8cdd4;padding:0}.auto-switch::after{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0002;transition:transform .15s}.auto-switch[aria-checked=true]{background:#27a779}.auto-switch[aria-checked=true]::after{transform:translateX(14px)}.manual-hint{font-size:11px;color:#929aa5;line-height:1.6;margin:0 1px 13px}.connection{border-top:1px solid #eef0f3}.connection summary{display:flex;align-items:center;justify-content:space-between;padding:12px 0;cursor:pointer;list-style:none;color:#667080;font-size:12px}.connection summary::-webkit-details-marker{display:none}.connection summary::after{content:"⌄";font-size:15px;color:#9aa1aa}.connection[open] summary::after{transform:rotate(180deg)}.connection-body{padding-bottom:13px}.cache-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid #eef0f3;padding-top:10px}.cache-clear{border:0;background:none;padding:3px 0;font-size:11px;color:#949ba5}.cache-clear:hover{color:#d73b57}
+    .update-group{display:flex;align-items:center;gap:8px}.version{font-size:10px;color:#a0a6af}.update-group a{text-decoration:none}.cache-clear:disabled{cursor:wait}
     @media(prefers-reduced-motion:reduce){button,input{transition:none}button:active{transform:none}}
     @media(max-width:420px){.header{padding:17px 18px 15px}.content{padding:0 18px 17px}.actions{gap:6px}.actions button{padding:0 10px}.panel{border-radius:18px}}
   `;
@@ -76,6 +79,8 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
   const status = el('p', '连接 AI 服务后，即可自动翻译。', statusCard, 'status-detail');
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
+  const retry = el('button', '重试未翻译内容', statusCard, 'cache-clear');
+  retry.hidden = true;
   el('p', '暂停自动翻译后，双击查词和划选翻译仍可使用。', content, 'manual-hint');
   const connection = el('details', '', content, 'connection');
   el('summary', '接口设置', connection);
@@ -99,6 +104,23 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
   const row = el('div', '', connectionBody, 'actions');
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
+  const updateGroup = el('div', '', cacheFooter, 'update-group');
+  el('span', 'v__ABCEED_VERSION__', updateGroup, 'version');
+  const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
+  const installUpdate = el('a', '', updateGroup, 'cache-clear');
+  installUpdate.hidden = true;
+  installUpdate.target = '_blank'; installUpdate.rel = 'noopener noreferrer';
+  checkUpdate.onclick = async () => {
+    checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
+    try {
+      const result = await checkForUpdate(GM_xmlhttpRequest, '__ABCEED_VERSION__');
+      if (result.available) {
+        installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
+        installUpdate.hidden = false; checkUpdate.hidden = true;
+      } else checkUpdate.textContent = '已是最新';
+    } catch { checkUpdate.textContent = '检查失败，重试'; }
+    finally { checkUpdate.disabled = false; }
+  };
   const clear = el('button', '清除缓存', cacheFooter, 'cache-clear');
   const toggle = el('button', '', root, 'toggle');
   icon('translate', toggle);
@@ -125,6 +147,7 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
     const detail = text.replace(/^自动翻译中(?: · |$)/, '').replace(/^已暂停；已显示的中文保持不变。$/, '');
     if (status.textContent !== detail) status.textContent = detail;
     status.hidden = !detail;
+    retry.hidden = !text.includes('部分内容未翻译');
     statusCard.dataset.state = state || '';
     toggle.dataset.state = state || '';
     statusTitle.textContent = state === 'running' ? '已开启' : state === 'paused' ? '已暂停' : '等待配置';
@@ -132,8 +155,9 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
     autoSwitch.title = state === 'running' ? '暂停自动翻译' : '开启自动翻译';
     toggle.title = text;
   };
+  const scheduler = new RequestScheduler();
   const cache = new TranslationCache({ read: () => GM_getValue('translationCache', undefined), write: snapshot => GM_setValue('translationCache', snapshot) });
-  const engine = new TranslationEngine({ doc: document, win: window, translate: createTranslator(GM_xmlhttpRequest), onStatus: setStatus, cache });
+  const engine = new TranslationEngine({ doc: document, win: window, translate: scheduler.wrap(createPageTranslator(GM_xmlhttpRequest)), onStatus: setStatus, cache });
   engine.attach();
   const saved = GM_getValue('config', {});
   endpoint.value = saved.endpoint || '';
@@ -143,8 +167,8 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
 
   const words = new WordLookup({ doc: document, win: window, root,
     getConfig: () => normalizeConfig({ endpoint: endpoint.value, model: model.value, key: key.value }),
-    translate: createWordTranslator(GM_xmlhttpRequest),
-    translateSelection: createSelectionTranslator(GM_xmlhttpRequest),
+    translate: scheduler.wrap(createWordTranslator(GM_xmlhttpRequest), 1),
+    translateSelection: scheduler.wrap(createSelectionTranslator(GM_xmlhttpRequest), 1),
     cache: new TranslationCache({ read: () => GM_getValue('wordCache', undefined), write: snapshot => GM_setValue('wordCache', snapshot) })
   });
 
@@ -174,6 +198,7 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
     engine.pause();
     GM_setValue('config', { ...GM_getValue('config', {}), enabled: false });
   };
+  retry.onclick = () => { autoFrameBridge.cancelAll(); engine.retryFailed(); retry.hidden = true; };
   clear.onclick = () => { autoFrameBridge.cancelAll(); frameBridge.cancelAll(); words.clearCache(); engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
   GM_registerMenuCommand('abceed AI 翻译设置', () => show(true));
   if (saved.enabled && key.value) {

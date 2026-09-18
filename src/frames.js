@@ -1,3 +1,4 @@
+import { wordCacheKey, translationScope } from './cache.js';
 import { WordLookup } from './words.js';
 import { TranslationEngine } from './engine.js';
 import { MAX_TEXT, MAX_BATCH_ITEMS, MAX_BATCH_CHARS } from './core.js';
@@ -16,7 +17,8 @@ export function attachFrameBridge({ win, doc, getConfig, translate, translateSel
       !Array.from(doc.querySelectorAll('iframe')).some(frame => frame.contentWindow === event.source)) return;
     if (data.type === 'cancel') { const current = pending.get(event.source); if (current?.requestId === data.id) { current.abort(); pending.delete(event.source); } return; }
     if (data.type !== 'request' || !['word', 'selection'].includes(data.mode) ||
-      typeof data.text !== 'string' || !data.text.trim() || data.text.length > (data.mode === 'word' ? 60 : 3000)) return;
+      typeof data.text !== 'string' || !data.text.trim() || data.text.length > (data.mode === 'word' ? 60 : 3000) ||
+      (data.context !== undefined && (typeof data.context !== 'string' || data.context.length > 600))) return;
     pending.get(event.source)?.abort();
     const controller = new AbortController();
     controller.requestId = data.id;
@@ -27,12 +29,12 @@ export function attachFrameBridge({ win, doc, getConfig, translate, translateSel
     };
     try {
       const config = getConfig();
-      const scope = `${config.endpoint}\n${config.model}`;
+      const scope = translationScope(config, 'word');
       if (cache.scope !== scope) cache.load(scope);
-      const key = data.mode === 'word' ? data.text : `selection:${data.text}`;
+      const key = data.mode === 'word' ? wordCacheKey(data.text, data.context) : `selection:${data.text}`;
       let result = cache.get(key);
       if (result === undefined) {
-        result = await (data.mode === 'word' ? translate : translateSelection)(data.text, config, controller.signal);
+        result = await (data.mode === 'word' ? translate : translateSelection)(data.text, config, controller.signal, data.context);
         if (controller.signal.aborted) return;
         cache.set(key, result); cache.flush();
       }
@@ -45,7 +47,7 @@ export function attachFrameBridge({ win, doc, getConfig, translate, translateSel
 }
 
 export function createFrameRequester(win) {
-  return (mode, text, config, signal) => new Promise((resolve, reject) => {
+  return (mode, text, config, signal, context = '') => new Promise((resolve, reject) => {
     const id = win.crypto.randomUUID();
     let timer;
     const finish = (error, result) => {
@@ -62,13 +64,13 @@ export function createFrameRequester(win) {
       const data = event.data;
       if (event.source !== win.parent || event.origin !== APP_ORIGIN || data?.channel !== FRAME_CHANNEL || data.type !== 'response' || data.id !== id) return;
       if (typeof data.error === 'string') finish(new Error(data.error));
-      else if (typeof data.result === 'string' || (mode === 'auto' && Array.isArray(data.result) && data.result.every(text => typeof text === 'string')) || (mode === 'state' && data.result && typeof data.result.enabled === 'boolean')) finish(null, data.result);
+      else if (typeof data.result === 'string' || (mode === 'auto' && Array.isArray(data.result) && data.result.every(text => text === null || typeof text === 'string')) || (mode === 'state' && data.result && typeof data.result.enabled === 'boolean')) finish(null, data.result);
     };
     if (signal?.aborted) { finish(new Error('翻译已暂停。')); return; }
     win.addEventListener('message', receive);
     signal?.addEventListener('abort', abort, { once: true });
     timer = win.setTimeout(() => { abort(); }, 75000);
-    win.parent.postMessage({ channel: FRAME_CHANNEL, type: 'request', id, mode, text }, APP_ORIGIN);
+    win.parent.postMessage({ channel: FRAME_CHANNEL, type: 'request', id, mode, text, context }, APP_ORIGIN);
   });
 }
 
@@ -86,7 +88,7 @@ export function attachContentLookup(doc, win) {
   // Persistent cache and provider settings stay in the parent; frames never receive keys.
   const cache = { scope: '', load(scope) { this.scope = scope; }, get() {}, set() {}, flush() {}, clear() {} };
   const words = new WordLookup({ doc, win, root, cache, getConfig: () => ({ endpoint: APP_ORIGIN, model: 'parent' }),
-    translate: (text, config, signal) => request('word', text, config, signal),
+    translate: (text, config, signal, context) => request('word', text, config, signal, context),
     translateSelection: (text, config, signal) => request('selection', text, config, signal)
   });
   const automatic = attachContentAutoTranslation(doc, win, request);
@@ -129,8 +131,11 @@ export function attachAutoFrameBridge({ win, doc, engine }) {
       if (controller.signal.aborted || !engine.active || engine.generation !== generation ||
         !Array.from(doc.querySelectorAll('iframe')).some(frame => frame.contentWindow === event.source)) throw new Error('自动翻译已暂停。');
       const results = new Map(missing.map((text, index) => [text, translated[index]]));
-      const output = data.text.map(text => results.get(text) ?? engine.cache.get(text));
-      for (const [text, result] of results) engine.cache.set(text, result);
+      const output = data.text.map(text => results.has(text) ? results.get(text) : engine.cache.get(text));
+      for (const [text, result] of results) {
+        if (result === null) { engine.failed?.add(text); continue; }
+        engine.cache.set(text, result);
+      }
       engine.cache.flush();
       reply({ result: output });
     } catch (error) { reply({ error: error.message }); }

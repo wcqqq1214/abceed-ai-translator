@@ -1,5 +1,5 @@
 import { hasJapanese, MAX_TEXT, MAX_BATCH_CHARS, MAX_BATCH_ITEMS, SESSION_BUDGET } from './core.js';
-import { TranslationCache } from './cache.js';
+import { TranslationCache, translationScope } from './cache.js';
 
 const EXCLUDE = 'script,style,noscript,textarea,input,code,pre,svg,math,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-abceed-ai-ui]';
 
@@ -25,6 +25,7 @@ export function visibleTextNode(node, win) {
 export class TranslationEngine {
   constructor({ doc, win, translate, onStatus = () => {}, isVisible = visibleTextNode, budget = SESSION_BUDGET, cache = new TranslationCache() }) {
     Object.assign(this, { doc, win, translate, onStatus, isVisible, budget });
+    this.failed = new Set();
     this.written = new WeakMap();
     this.cache = cache;
     this.cacheHits = 0;
@@ -47,6 +48,7 @@ export class TranslationEngine {
     this.interval = this.win.setInterval(() => {
       if (this.lastURL !== this.win.location.href) {
         this.lastURL = this.win.location.href;
+        this.failed.clear();
         this.generation++;
         this.controller?.abort();
       }
@@ -56,7 +58,8 @@ export class TranslationEngine {
 
   start(config) {
     this.pause();
-    const scope = `${config.endpoint}\n${config.model}`;
+    const scope = translationScope(config);
+    this.failed.clear();
     if (scope !== this.cacheScope) this.cache.load(scope);
     this.cacheScope = scope;
     this.config = config;
@@ -85,6 +88,14 @@ export class TranslationEngine {
     this.cache.clear();
     this.cacheHits = 0;
     if (wasActive) this.start(config);
+  }
+
+  retryFailed() {
+    this.generation++;
+    this.controller?.abort();
+    this.failed.clear();
+    if (this.config && !this.active) this.start(this.config);
+    else this.schedule();
   }
 
   *translationNodes() {
@@ -145,7 +156,7 @@ export class TranslationEngine {
       const source = node.nodeValue;
       if (this.written.get(node) === source || !hasJapanese(source) || !this.isVisible(node, this.win)) continue;
       const text = source.trim();
-      if (translatedValues.has(text)) continue;
+      if (translatedValues.has(text) || this.failed.has(text)) continue;
       if (text.length > MAX_TEXT) { oversized++; continue; }
       const cached = this.cache.get(text);
       if (cached !== undefined) { this.write(node, source, cached); this.cacheHits++; continue; }
@@ -155,7 +166,7 @@ export class TranslationEngine {
       size += text.length;
     }
     if (!groups.size) {
-      this.onStatus(`自动翻译中${oversized ? ` · ${oversized} 处文本过长，未发送` : ''}`, 'running');
+      this.onStatus(`自动翻译中${this.failed.size ? ' · 部分内容未翻译，可重试' : ''}${oversized ? ` · ${oversized} 处文本过长，未发送` : ''}`, 'running');
       return;
     }
     if (this.used + size > this.budget) {
@@ -173,6 +184,7 @@ export class TranslationEngine {
       if (!this.active || generation !== this.generation || url !== this.win.location.href) return;
       if (!Array.isArray(results) || results.length !== texts.length) throw new Error('译文数量不正确。');
       for (let i = 0; i < texts.length; i++) {
+        if (results[i] === null) { this.failed.add(texts[i]); continue; }
         this.cache.set(texts[i], results[i]);
         for (const { node, source } of groups.get(texts[i])) this.write(node, source, results[i]);
       }
