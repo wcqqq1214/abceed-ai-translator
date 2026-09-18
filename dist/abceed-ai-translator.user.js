@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.4.5
+// @version      1.4.6
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -510,7 +510,7 @@ class TranslationEngine {
 }
 
 
-const ENGLISH_WORD = /^[A-Za-z]+(?:['’\-][A-Za-z]+)*$/;
+const ENGLISH_WORD = /^[A-Za-z]+(?:['’\-‐‑][A-Za-z]+)*$/;
 const WORD_EXCLUDE = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[data-abceed-ai-ui]';
 
 function formatWordMeaning(text) {
@@ -524,6 +524,19 @@ function selectedEnglishWord(doc, target) {
   const selection = doc.getSelection();
   if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;
   const range = selection.getRangeAt(0);
+  // Browser double-click selection stops at hyphens; expand inside the text node.
+  if (range.startContainer === range.endContainer && range.startContainer.nodeType === 3) {
+    const node = range.startContainer;
+    const text = node.nodeValue;
+    let start = range.startOffset, end = range.endOffset;
+    while (start > 0 && /[A-Za-z'’\-‐‑]/.test(text[start - 1])) start--;
+    while (end < text.length && /[A-Za-z'’\-‐‑]/.test(text[end])) end++;
+    const expanded = text.slice(start, end);
+    if (expanded.length <= 60 && ENGLISH_WORD.test(expanded)) {
+      range.setStart(node, start); range.setEnd(node, end);
+      selection.removeAllRanges(); selection.addRange(range);
+    }
+  }
   const word = selection.toString().trim();
   if (word.length > 60 || !ENGLISH_WORD.test(word) || !target.contains(range.commonAncestorContainer)) return null;
   return word;
@@ -637,7 +650,7 @@ class WordLookup {
     this.onSelection = event => {
       if (!this.translateSelection || event.button !== 0 || event.detail >= 2) return;
       const text = selectedEnglishText(doc, event.target);
-      if (text && !ENGLISH_WORD.test(text)) void this.lookup(text, event.clientX, event.clientY, 'selection', doc.getSelection().getRangeAt(0).getBoundingClientRect());
+      if (text) void this.lookup(text, event.clientX, event.clientY, ENGLISH_WORD.test(text) && text.length <= 60 ? 'word' : 'selection', doc.getSelection().getRangeAt(0).getBoundingClientRect());
     };
     this.onOutside = event => { if (!event.composedPath().includes(root.host || this.popup)) this.hide(); };
     this.onKey = event => { if (event.key === 'Escape') this.hide(); };

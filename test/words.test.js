@@ -171,3 +171,38 @@ test('drag mouseup translates selected phrase without click and ignores double-c
   assert.equal(calls, 1);
   words.destroy(); dom.window.close();
 });
+
+
+test('double-click expands hyphenated words and contractions from either half', () => {
+  const dom = new JSDOM('<p></p>');
+  const doc = dom.window.document, p = doc.querySelector('p');
+  for (const word of ['hands-on', 'hands‐on', 'hands‑on', "don't", 'state-of-the-art']) {
+    p.textContent = `acquire ${word} experience`;
+    for (const offset of [8, 8 + word.length - 1]) {
+      const range = doc.createRange(); range.setStart(p.firstChild, offset); range.setEnd(p.firstChild, offset + 1);
+      doc.getSelection().removeAllRanges(); doc.getSelection().addRange(range);
+      assert.equal(selectedEnglishWord(doc, p), word);
+      assert.equal(doc.getSelection().toString(), word);
+    }
+  }
+  dom.window.close();
+});
+
+test('dragging a single word or hyphenated compound uses dictionary lookup', async () => {
+  const seen = [];
+  const { dom, doc, words } = setup(async word => { seen.push(word); return 'adj. 实践的'; });
+  words.translateSelection = async () => { throw new Error('dictionary expected'); };
+  dom.window.Range.prototype.getBoundingClientRect = () => ({ left: 100, top: 100, bottom: 120 });
+  const p = doc.querySelector('p');
+  for (const word of ['hands-on', 'experience']) {
+    p.textContent = word;
+    const range = doc.createRange(); range.selectNodeContents(p);
+    doc.getSelection().removeAllRanges(); doc.getSelection().addRange(range);
+    p.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true, button: 0, detail: 1 }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(words.title.textContent, word);
+    assert.equal(words.meaning.textContent, 'adj. 实践的');
+  }
+  assert.deepEqual(seen, ['hands-on', 'experience']);
+  words.destroy(); dom.window.close();
+});

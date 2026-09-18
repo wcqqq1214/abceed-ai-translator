@@ -1,6 +1,6 @@
 import { createRequestTranslator } from './core.js';
 
-const ENGLISH_WORD = /^[A-Za-z]+(?:['’\-][A-Za-z]+)*$/;
+const ENGLISH_WORD = /^[A-Za-z]+(?:['’\-‐‑][A-Za-z]+)*$/;
 const WORD_EXCLUDE = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[data-abceed-ai-ui]';
 
 export function formatWordMeaning(text) {
@@ -14,6 +14,19 @@ export function selectedEnglishWord(doc, target) {
   const selection = doc.getSelection();
   if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;
   const range = selection.getRangeAt(0);
+  // Browser double-click selection stops at hyphens; expand inside the text node.
+  if (range.startContainer === range.endContainer && range.startContainer.nodeType === 3) {
+    const node = range.startContainer;
+    const text = node.nodeValue;
+    let start = range.startOffset, end = range.endOffset;
+    while (start > 0 && /[A-Za-z'’\-‐‑]/.test(text[start - 1])) start--;
+    while (end < text.length && /[A-Za-z'’\-‐‑]/.test(text[end])) end++;
+    const expanded = text.slice(start, end);
+    if (expanded.length <= 60 && ENGLISH_WORD.test(expanded)) {
+      range.setStart(node, start); range.setEnd(node, end);
+      selection.removeAllRanges(); selection.addRange(range);
+    }
+  }
   const word = selection.toString().trim();
   if (word.length > 60 || !ENGLISH_WORD.test(word) || !target.contains(range.commonAncestorContainer)) return null;
   return word;
@@ -127,7 +140,7 @@ export class WordLookup {
     this.onSelection = event => {
       if (!this.translateSelection || event.button !== 0 || event.detail >= 2) return;
       const text = selectedEnglishText(doc, event.target);
-      if (text && !ENGLISH_WORD.test(text)) void this.lookup(text, event.clientX, event.clientY, 'selection', doc.getSelection().getRangeAt(0).getBoundingClientRect());
+      if (text) void this.lookup(text, event.clientX, event.clientY, ENGLISH_WORD.test(text) && text.length <= 60 ? 'word' : 'selection', doc.getSelection().getRangeAt(0).getBoundingClientRect());
     };
     this.onOutside = event => { if (!event.composedPath().includes(root.host || this.popup)) this.hide(); };
     this.onKey = event => { if (event.key === 'Escape') this.hide(); };
