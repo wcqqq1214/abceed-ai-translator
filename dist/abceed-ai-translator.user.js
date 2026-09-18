@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.4.6
+// @version      1.4.7
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -661,12 +661,26 @@ class WordLookup {
     doc.addEventListener('keydown', this.onKey);
     win.addEventListener('scroll', this.onMove, true);
     win.addEventListener('resize', this.onMove);
+    this.checkPage = () => {
+      if (this.popup.hidden) return;
+      if (win.location.href !== this.lookupURL || (this.sourceNode &&
+        (!this.sourceNode.isConnected || this.sourceNode.textContent !== this.sourceText))) this.hide();
+    };
+    this.onNavigation = () => this.hide();
+    win.addEventListener('popstate', this.onNavigation);
+    win.addEventListener('hashchange', this.onNavigation);
+    win.addEventListener('pagehide', this.onNavigation);
+    this.pageObserver = new win.MutationObserver(this.checkPage);
+    this.pageObserver.observe(doc.body, { subtree: true, childList: true, characterData: true });
+    // pushState/replaceState do not emit popstate; also catch URL-only transitions.
+    this.pageTimer = win.setInterval(this.checkPage, 250);
   }
 
   hide() {
     this.generation++;
     this.controller?.abort();
     this.popup.hidden = true;
+    this.sourceNode = undefined;
   }
 
   position(x, y, anchor) {
@@ -682,6 +696,11 @@ class WordLookup {
     this.hide();
     const generation = this.generation;
     const url = this.win.location.href;
+    this.lookupURL = url;
+    const selection = this.doc.getSelection();
+    this.sourceNode = selection?.rangeCount && selection.toString().trim() === word
+      ? selection.getRangeAt(0).commonAncestorContainer : undefined;
+    this.sourceText = this.sourceNode?.textContent;
     this.popup.hidden = false;
     this.title.textContent = mode === 'selection' ? '划选翻译' : word;
     this.meaning.hidden = false;
@@ -704,6 +723,7 @@ class WordLookup {
       this.meaning.textContent = format(meaning);
     } catch (error) {
       if (generation !== this.generation) return;
+      if (url !== this.win.location.href) { this.hide(); return; }
       this.meaning.textContent = error.message;
     }
     this.position(x, y, anchor);
@@ -719,6 +739,11 @@ class WordLookup {
     this.doc.removeEventListener('keydown', this.onKey);
     this.win.removeEventListener('scroll', this.onMove, true);
     this.win.removeEventListener('resize', this.onMove);
+    this.win.removeEventListener('popstate', this.onNavigation);
+    this.win.removeEventListener('hashchange', this.onNavigation);
+    this.win.removeEventListener('pagehide', this.onNavigation);
+    this.pageObserver.disconnect();
+    this.win.clearInterval(this.pageTimer);
     this.popup.remove();
   }
 }

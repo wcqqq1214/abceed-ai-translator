@@ -206,3 +206,42 @@ test('dragging a single word or hyphenated compound uses dictionary lookup', asy
   assert.deepEqual(seen, ['hands-on', 'experience']);
   words.destroy(); dom.window.close();
 });
+
+
+test('SPA navigation closes completed and cached lookup popups', async () => {
+  const { dom, words } = setup(async () => 'n. 词');
+  await words.lookup('word', 10, 10);
+  dom.window.history.pushState({}, '', '/results');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(words.popup.hidden, true);
+  await words.lookup('word', 10, 10);
+  assert.equal(words.popup.hidden, false);
+  dom.window.history.replaceState({}, '', '/next');
+  words.checkPage();
+  assert.equal(words.popup.hidden, true);
+  words.destroy(); dom.window.close();
+});
+
+test('navigation aborts pending lookup and ignores late results', async () => {
+  let resolve, signal;
+  const { dom, words, cache } = setup((word, config, s) => { signal = s; return new Promise(r => resolve = r); });
+  const pending = words.lookup('word', 10, 10);
+  dom.window.dispatchEvent(new dom.window.PopStateEvent('popstate'));
+  assert.equal(signal.aborted, true);
+  resolve('n. 词'); await pending;
+  assert.equal(words.popup.hidden, true);
+  assert.equal(cache.get('word'), undefined);
+  words.destroy(); dom.window.close();
+});
+
+test('replacing selected question content closes popup even without URL change', async () => {
+  const { dom, doc, words } = setup(async () => 'n. 词');
+  const p = doc.querySelector('p'); p.textContent = 'word';
+  const range = doc.createRange(); range.selectNodeContents(p.firstChild);
+  doc.getSelection().addRange(range);
+  await words.lookup('word', 10, 10);
+  p.textContent = 'next question';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(words.popup.hidden, true);
+  words.destroy(); dom.window.close();
+});
