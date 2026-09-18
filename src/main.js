@@ -7,6 +7,10 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
 (() => {
   if (document.querySelector('[data-abceed-ai-ui]')) return;
   if (window.top !== window) { attachContentLookup(document, window); return; }
+  // The site's selection toolbar duplicates the AI lookup popup.
+  const selectionStyle = document.createElement('style');
+  selectionStyle.textContent = '.selected-word:has(> .selected-word__inner){display:none!important}';
+  document.documentElement.append(selectionStyle);
   const host = document.createElement('div');
   host.setAttribute('data-abceed-ai-ui', '');
   host.setAttribute('translate', 'no');
