@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.0.1
+// @version      1.1.0
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -172,6 +172,96 @@ function createTranslator(gmRequest) {
   });
 }
 
+const CACHE_TTL = 30 * 24 * 60 * 60 * 1000;
+const CACHE_LIMIT = 1000;
+const CACHE_CHAR_LIMIT = 1000000;
+
+class TranslationCache {
+  constructor({ read = () => undefined, write = () => {}, now = Date.now, ttl = CACHE_TTL, limit = CACHE_LIMIT, maxChars = CACHE_CHAR_LIMIT } = {}) {
+    Object.assign(this, { read, write, now, ttl, limit, maxChars });
+    this.items = new Map();
+    this.pending = new Map();
+    this.scope = '';
+  }
+
+  decode(snapshot) {
+    if (snapshot?.version !== 1 || snapshot.scope !== this.scope || !Array.isArray(snapshot.entries)) return [];
+    const now = this.now();
+    return snapshot.entries.filter(entry => Array.isArray(entry) && entry.length === 3 &&
+      typeof entry[0] === 'string' && entry[0].length > 0 && entry[0].length <= 16000 &&
+      typeof entry[1] === 'string' && entry[1].length > 0 && entry[1].length <= 48000 &&
+      Number.isFinite(entry[2]) && entry[2] > now && entry[2] <= now + this.ttl);
+  }
+
+  load(scope) {
+    this.scope = scope;
+    this.items.clear();
+    this.pending.clear();
+    try {
+      for (const [source, text, expires] of this.decode(this.read())) this.items.set(source, { text, expires });
+    } catch { /* A storage failure must not prevent translation. */ }
+    this.trim();
+  }
+
+  trim() {
+    let chars = 0;
+    for (const [source, entry] of this.items) {
+      if (entry.expires <= this.now()) { this.items.delete(source); this.pending.delete(source); }
+      else chars += source.length + entry.text.length;
+    }
+    while (this.items.size > this.limit || chars > this.maxChars) {
+      const source = this.items.keys().next().value;
+      chars -= source.length + this.items.get(source).text.length;
+      this.items.delete(source);
+      this.pending.delete(source);
+    }
+  }
+
+  get(source) {
+    const entry = this.items.get(source);
+    if (!entry) return undefined;
+    if (entry.expires <= this.now()) { this.items.delete(source); return undefined; }
+    // Retain frequently used menu labels when the bounded cache fills up.
+    this.items.delete(source);
+    this.items.set(source, entry);
+    return entry.text;
+  }
+
+  set(source, text) {
+    const entry = { text, expires: this.now() + this.ttl };
+    this.items.delete(source);
+    this.items.set(source, entry);
+    this.pending.set(source, entry);
+    this.trim();
+  }
+
+  values() {
+    this.trim();
+    return [...this.items.values()].map(entry => entry.text);
+  }
+
+  flush() {
+    if (!this.pending.size) return;
+    try {
+      // Merge only new results, so two tabs do not erase each other's translations.
+      const merged = new Map(this.items);
+      for (const [source, text, expires] of this.decode(this.read())) merged.set(source, { text, expires });
+      for (const [source, entry] of this.pending) { merged.delete(source); merged.set(source, entry); }
+      this.items = merged;
+      this.trim();
+      this.write({ version: 1, scope: this.scope, entries: [...this.items].map(([source, entry]) => [source, entry.text, entry.expires]) });
+      this.pending.clear();
+    } catch { /* Keep in-memory results if persistence is unavailable. */ }
+  }
+
+  clear() {
+    this.items.clear();
+    this.pending.clear();
+    try { this.write({ version: 1, scope: this.scope, entries: [] }); }
+    catch { /* In-memory clearing remains available. */ }
+  }
+}
+
 
 const EXCLUDE = 'script,style,noscript,textarea,input,select,option,code,pre,svg,math,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-abceed-ai-ui]';
 
@@ -189,10 +279,11 @@ function visibleTextNode(node, win) {
 }
 
 class TranslationEngine {
-  constructor({ doc, win, translate, onStatus = () => {}, isVisible = visibleTextNode, budget = SESSION_BUDGET }) {
+  constructor({ doc, win, translate, onStatus = () => {}, isVisible = visibleTextNode, budget = SESSION_BUDGET, cache = new TranslationCache() }) {
     Object.assign(this, { doc, win, translate, onStatus, isVisible, budget });
     this.written = new WeakMap();
-    this.cache = new Map();
+    this.cache = cache;
+    this.cacheHits = 0;
     this.active = false;
     this.busy = false;
     this.generation = 0;
@@ -222,11 +313,12 @@ class TranslationEngine {
   start(config) {
     this.pause();
     const scope = `${config.endpoint}\n${config.model}`;
-    if (scope !== this.cacheScope) this.cache.clear();
+    if (scope !== this.cacheScope) this.cache.load(scope);
     this.cacheScope = scope;
     this.config = config;
     this.active = true;
     this.onStatus('自动翻译已开启，等待页面日文…', 'running');
+    this.applyCached();
     this.schedule();
   }
 
@@ -236,13 +328,41 @@ class TranslationEngine {
     this.controller?.abort();
     this.win.clearTimeout(this.timer);
     this.timer = undefined;
+    this.win.cancelAnimationFrame(this.cacheFrame);
+    this.cacheFrame = undefined;
     this.onStatus(message, 'paused');
   }
 
-  clearCache() { this.cache.clear(); }
+  clearCache() {
+    const config = this.config;
+    const wasActive = this.active;
+    // Prevent an in-flight result from repopulating a cache the user just cleared.
+    this.pause();
+    this.cache.clear();
+    this.cacheHits = 0;
+    if (wasActive) this.start(config);
+  }
+
+  applyCached() {
+    if (!this.active || this.doc.hidden) return;
+    const walker = this.doc.createTreeWalker(this.doc.body, this.win.NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const source = node.nodeValue;
+      if (this.written.get(node) === source || !hasJapanese(source)) continue;
+      const cached = this.cache.get(source.trim());
+      if (cached !== undefined && this.isVisible(node, this.win)) { this.write(node, source, cached); this.cacheHits++; }
+    }
+  }
 
   schedule() {
-    if (!this.active || this.busy || this.timer) return;
+    if (!this.active) return;
+    // Local hits have a separate fast path, including while AI requests are pending.
+    if (!this.cacheFrame) this.cacheFrame = this.win.requestAnimationFrame(() => {
+      this.cacheFrame = undefined;
+      this.applyCached();
+    });
+    if (this.busy || this.timer) return;
     this.timer = this.win.setTimeout(() => {
       this.timer = undefined;
       this.tick();
@@ -264,6 +384,7 @@ class TranslationEngine {
     const generation = this.generation;
     const url = this.win.location.href;
     const groups = new Map();
+    const translatedValues = new Set(this.cache.values());
     let size = 0, oversized = 0;
     const walker = this.doc.createTreeWalker(this.doc.body, this.win.NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
@@ -271,16 +392,17 @@ class TranslationEngine {
       const source = node.nodeValue;
       if (this.written.get(node) === source || !hasJapanese(source) || !this.isVisible(node, this.win)) continue;
       const text = source.trim();
-      if ([...this.cache.values()].includes(text)) continue;
+      if (translatedValues.has(text)) continue;
       if (text.length > MAX_TEXT) { oversized++; continue; }
-      if (this.cache.has(text)) { this.write(node, source, this.cache.get(text)); continue; }
+      const cached = this.cache.get(text);
+      if (cached !== undefined) { this.write(node, source, cached); this.cacheHits++; continue; }
       if (groups.has(text)) { groups.get(text).push({ node, source }); continue; }
       if (groups.size >= MAX_BATCH_ITEMS || (groups.size && size + text.length > MAX_BATCH_CHARS)) continue;
       groups.set(text, [{ node, source }]);
       size += text.length;
     }
     if (!groups.size) {
-      this.onStatus(`自动翻译中 · 已替换 ${this.count} 处${oversized ? ` · ${oversized} 处文本过长，未发送` : ''}`, 'running');
+      this.onStatus(`自动翻译中 · 已替换 ${this.count} 处 · 缓存命中 ${this.cacheHits} 处${oversized ? ` · ${oversized} 处文本过长，未发送` : ''}`, 'running');
       return;
     }
     if (this.used + size > this.budget) {
@@ -298,10 +420,10 @@ class TranslationEngine {
       if (!this.active || generation !== this.generation || url !== this.win.location.href) return;
       if (!Array.isArray(results) || results.length !== texts.length) throw new Error('译文数量不正确。');
       for (let i = 0; i < texts.length; i++) {
-        if (this.cache.size >= 500) this.cache.delete(this.cache.keys().next().value);
         this.cache.set(texts[i], results[i]);
         for (const { node, source } of groups.get(texts[i])) this.write(node, source, results[i]);
       }
+      this.cache.flush();
     } catch (error) {
       if (generation === this.generation && this.active) this.pause(error.message);
     } finally {
@@ -383,7 +505,7 @@ class TranslationEngine {
   status.className = 'status';
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
-  const foot = el('p', '开启后，可见日文会自动发送给所填服务商，可能产生 API 费用。请关闭 Chrome 自带的整页翻译。Key 不写入网页存储；译文只缓存在本标签页。', panel);
+  const foot = el('p', '开启后，新日文会发送给所填服务商，可能产生 API 费用。请关闭 Chrome 自带的整页翻译。译文在 Tampermonkey 本地缓存 30 天，重开页面可直接复用。', panel);
   foot.className = 'foot';
   const cleanup = el('div', '', panel);
   cleanup.className = 'row';
@@ -411,7 +533,8 @@ class TranslationEngine {
     toggle.textContent = state === 'running' ? '中 · AI 开启' : '中 · AI 设置';
     toggle.title = text;
   };
-  const engine = new TranslationEngine({ doc: document, win: window, translate: createTranslator(GM_xmlhttpRequest), onStatus: setStatus });
+  const cache = new TranslationCache({ read: () => GM_getValue('translationCache', undefined), write: snapshot => GM_setValue('translationCache', snapshot) });
+  const engine = new TranslationEngine({ doc: document, win: window, translate: createTranslator(GM_xmlhttpRequest), onStatus: setStatus, cache });
   engine.attach();
   const saved = GM_getValue('config', {});
   endpoint.value = saved.endpoint || '';
@@ -435,7 +558,7 @@ class TranslationEngine {
     engine.pause();
     GM_setValue('config', { ...GM_getValue('config', {}), enabled: false });
   };
-  clear.onclick = () => { engine.clearCache(); setStatus('缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
+  clear.onclick = () => { engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
   forget.onclick = () => {
     engine.pause('Key 已清除，自动翻译已暂停。');
     engine.config = undefined;

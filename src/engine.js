@@ -1,4 +1,5 @@
 import { hasJapanese, MAX_TEXT, MAX_BATCH_CHARS, MAX_BATCH_ITEMS, SESSION_BUDGET } from './core.js';
+import { TranslationCache } from './cache.js';
 
 const EXCLUDE = 'script,style,noscript,textarea,input,select,option,code,pre,svg,math,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-abceed-ai-ui]';
 
@@ -16,10 +17,11 @@ export function visibleTextNode(node, win) {
 }
 
 export class TranslationEngine {
-  constructor({ doc, win, translate, onStatus = () => {}, isVisible = visibleTextNode, budget = SESSION_BUDGET }) {
+  constructor({ doc, win, translate, onStatus = () => {}, isVisible = visibleTextNode, budget = SESSION_BUDGET, cache = new TranslationCache() }) {
     Object.assign(this, { doc, win, translate, onStatus, isVisible, budget });
     this.written = new WeakMap();
-    this.cache = new Map();
+    this.cache = cache;
+    this.cacheHits = 0;
     this.active = false;
     this.busy = false;
     this.generation = 0;
@@ -49,11 +51,12 @@ export class TranslationEngine {
   start(config) {
     this.pause();
     const scope = `${config.endpoint}\n${config.model}`;
-    if (scope !== this.cacheScope) this.cache.clear();
+    if (scope !== this.cacheScope) this.cache.load(scope);
     this.cacheScope = scope;
     this.config = config;
     this.active = true;
     this.onStatus('自动翻译已开启，等待页面日文…', 'running');
+    this.applyCached();
     this.schedule();
   }
 
@@ -63,13 +66,41 @@ export class TranslationEngine {
     this.controller?.abort();
     this.win.clearTimeout(this.timer);
     this.timer = undefined;
+    this.win.cancelAnimationFrame(this.cacheFrame);
+    this.cacheFrame = undefined;
     this.onStatus(message, 'paused');
   }
 
-  clearCache() { this.cache.clear(); }
+  clearCache() {
+    const config = this.config;
+    const wasActive = this.active;
+    // Prevent an in-flight result from repopulating a cache the user just cleared.
+    this.pause();
+    this.cache.clear();
+    this.cacheHits = 0;
+    if (wasActive) this.start(config);
+  }
+
+  applyCached() {
+    if (!this.active || this.doc.hidden) return;
+    const walker = this.doc.createTreeWalker(this.doc.body, this.win.NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const source = node.nodeValue;
+      if (this.written.get(node) === source || !hasJapanese(source)) continue;
+      const cached = this.cache.get(source.trim());
+      if (cached !== undefined && this.isVisible(node, this.win)) { this.write(node, source, cached); this.cacheHits++; }
+    }
+  }
 
   schedule() {
-    if (!this.active || this.busy || this.timer) return;
+    if (!this.active) return;
+    // Local hits have a separate fast path, including while AI requests are pending.
+    if (!this.cacheFrame) this.cacheFrame = this.win.requestAnimationFrame(() => {
+      this.cacheFrame = undefined;
+      this.applyCached();
+    });
+    if (this.busy || this.timer) return;
     this.timer = this.win.setTimeout(() => {
       this.timer = undefined;
       this.tick();
@@ -91,6 +122,7 @@ export class TranslationEngine {
     const generation = this.generation;
     const url = this.win.location.href;
     const groups = new Map();
+    const translatedValues = new Set(this.cache.values());
     let size = 0, oversized = 0;
     const walker = this.doc.createTreeWalker(this.doc.body, this.win.NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
@@ -98,16 +130,17 @@ export class TranslationEngine {
       const source = node.nodeValue;
       if (this.written.get(node) === source || !hasJapanese(source) || !this.isVisible(node, this.win)) continue;
       const text = source.trim();
-      if ([...this.cache.values()].includes(text)) continue;
+      if (translatedValues.has(text)) continue;
       if (text.length > MAX_TEXT) { oversized++; continue; }
-      if (this.cache.has(text)) { this.write(node, source, this.cache.get(text)); continue; }
+      const cached = this.cache.get(text);
+      if (cached !== undefined) { this.write(node, source, cached); this.cacheHits++; continue; }
       if (groups.has(text)) { groups.get(text).push({ node, source }); continue; }
       if (groups.size >= MAX_BATCH_ITEMS || (groups.size && size + text.length > MAX_BATCH_CHARS)) continue;
       groups.set(text, [{ node, source }]);
       size += text.length;
     }
     if (!groups.size) {
-      this.onStatus(`自动翻译中 · 已替换 ${this.count} 处${oversized ? ` · ${oversized} 处文本过长，未发送` : ''}`, 'running');
+      this.onStatus(`自动翻译中 · 已替换 ${this.count} 处 · 缓存命中 ${this.cacheHits} 处${oversized ? ` · ${oversized} 处文本过长，未发送` : ''}`, 'running');
       return;
     }
     if (this.used + size > this.budget) {
@@ -125,10 +158,10 @@ export class TranslationEngine {
       if (!this.active || generation !== this.generation || url !== this.win.location.href) return;
       if (!Array.isArray(results) || results.length !== texts.length) throw new Error('译文数量不正确。');
       for (let i = 0; i < texts.length; i++) {
-        if (this.cache.size >= 500) this.cache.delete(this.cache.keys().next().value);
         this.cache.set(texts[i], results[i]);
         for (const { node, source } of groups.get(texts[i])) this.write(node, source, results[i]);
       }
+      this.cache.flush();
     } catch (error) {
       if (generation === this.generation && this.active) this.pause(error.message);
     } finally {

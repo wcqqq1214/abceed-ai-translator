@@ -1,5 +1,6 @@
 import { normalizeConfig, createTranslator } from './core.js';
 import { TranslationEngine } from './engine.js';
+import { TranslationCache } from './cache.js';
 
 (() => {
   if (document.querySelector('[data-abceed-ai-ui]')) return;
@@ -62,7 +63,7 @@ import { TranslationEngine } from './engine.js';
   status.className = 'status';
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
-  const foot = el('p', '开启后，可见日文会自动发送给所填服务商，可能产生 API 费用。请关闭 Chrome 自带的整页翻译。Key 不写入网页存储；译文只缓存在本标签页。', panel);
+  const foot = el('p', '开启后，新日文会发送给所填服务商，可能产生 API 费用。请关闭 Chrome 自带的整页翻译。译文在 Tampermonkey 本地缓存 30 天，重开页面可直接复用。', panel);
   foot.className = 'foot';
   const cleanup = el('div', '', panel);
   cleanup.className = 'row';
@@ -90,7 +91,8 @@ import { TranslationEngine } from './engine.js';
     toggle.textContent = state === 'running' ? '中 · AI 开启' : '中 · AI 设置';
     toggle.title = text;
   };
-  const engine = new TranslationEngine({ doc: document, win: window, translate: createTranslator(GM_xmlhttpRequest), onStatus: setStatus });
+  const cache = new TranslationCache({ read: () => GM_getValue('translationCache', undefined), write: snapshot => GM_setValue('translationCache', snapshot) });
+  const engine = new TranslationEngine({ doc: document, win: window, translate: createTranslator(GM_xmlhttpRequest), onStatus: setStatus, cache });
   engine.attach();
   const saved = GM_getValue('config', {});
   endpoint.value = saved.endpoint || '';
@@ -114,7 +116,7 @@ import { TranslationEngine } from './engine.js';
     engine.pause();
     GM_setValue('config', { ...GM_getValue('config', {}), enabled: false });
   };
-  clear.onclick = () => { engine.clearCache(); setStatus('缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
+  clear.onclick = () => { engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
   forget.onclick = () => {
     engine.pause('Key 已清除，自动翻译已暂停。');
     engine.config = undefined;

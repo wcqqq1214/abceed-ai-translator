@@ -26,7 +26,7 @@ const header = `// ==UserScript==
 // @updateURL    ${raw}
 // ==/UserScript==
 `;
-const sources = await Promise.all(['core', 'engine', 'main'].map(async name => {
+const sources = await Promise.all(['core', 'cache', 'engine', 'main'].map(async name => {
   const source = await readFile(new URL(`src/${name}.js`, project), 'utf8');
   return source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
 }));
