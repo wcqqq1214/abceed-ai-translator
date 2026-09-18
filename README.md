@@ -10,8 +10,4 @@
 
 译文在本地缓存 30 天。新内容会发送给配置的 AI 服务商，可能产生费用。不支持图片内文字。脚本未运行时，请检查 [用户脚本执行权限](https://www.tampermonkey.net/faq.php?locale=zh&q=Q209)。
 
-## 开发
-
-Node.js 26+：`npm ci` → `npm run check`。产物位于 `dist/`，`npm run demo` 可启动模拟演示。
-
 [MIT](LICENSE) · 非 abceed 官方项目。
