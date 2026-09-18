@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.4.3
+// @version      1.4.4
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -806,7 +806,7 @@ function attachContentLookup(doc, win) {
   if (window.top !== window) { attachContentLookup(document, window); return; }
   // The site's selection toolbar duplicates the AI lookup popup.
   const selectionStyle = document.createElement('style');
-  selectionStyle.textContent = '.selected-word:has(> .selected-word__inner){display:none!important}';
+  selectionStyle.textContent = '.selected-word:has(> .selected-word__inner),.selected-word:has(> .selected-word__inner) ~ .arrow-icon{display:none!important}';
   document.documentElement.append(selectionStyle);
   const host = document.createElement('div');
   host.setAttribute('data-abceed-ai-ui', '');
