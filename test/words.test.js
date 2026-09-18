@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { selectedEnglishWord, createWordTranslator, WordLookup } from '../src/words.js';
+import { selectedEnglishWord, createWordTranslator, WordLookup, formatWordMeaning } from '../src/words.js';
 import { TranslationCache } from '../src/cache.js';
 
 const config = { endpoint: 'https://api.deepseek.com/chat/completions', model: 'test', key: 'test-only' };
@@ -14,7 +14,7 @@ test('word requests use AI dictionary instructions and disable DeepSeek thinking
     queueMicrotask(() => options.onload({ status: 200, responseText: envelope('动词：推迟。') }));
     return { abort() {} };
   });
-  assert.equal(await translate('postponed', config), '动词：推迟。');
+  assert.equal(await translate('postponed', config), 'v. 推迟。');
   assert.deepEqual(JSON.parse(body.messages[1].content), { word: 'postponed' });
   assert.deepEqual(body.thinking, { type: 'disabled' });
   await assert.rejects(translate('two words', config), /一个英文单词/);
@@ -79,5 +79,19 @@ test('new word and closing cancel older requests without stale results or cache 
   pending[2].resolve('第三'); await third;
   assert.equal(cache.get('third'), undefined);
   assert.equal(words.popup.hidden, true);
+  words.destroy(); dom.window.close();
+});
+
+
+test('formats cached Chinese part-of-speech labels without changing definitions', async () => {
+  assert.equal(formatWordMeaning('名词：动作；动词：行动\n形容词: 活跃的；不及物动词：移动'), 'n. 动作；v. 行动\nadj. 活跃的；vi. 移动');
+  assert.equal(formatWordMeaning('n. 表示动词的名词'), 'n. 表示动词的名词');
+  let calls = 0;
+  const { dom, words, cache } = setup(async () => { calls++; return ''; });
+  cache.load(`${config.endpoint}\n${config.model}`);
+  cache.set('word', '名词：词；动词：措辞');
+  await words.lookup('word', 100, 100);
+  assert.equal(words.meaning.textContent, 'n. 词；v. 措辞');
+  assert.equal(calls, 0);
   words.destroy(); dom.window.close();
 });
