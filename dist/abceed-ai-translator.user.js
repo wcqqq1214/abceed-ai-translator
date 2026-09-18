@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.2.2
+// @version      1.2.3
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -466,10 +466,9 @@ class TranslationEngine {
     .field{margin-top:10px}.field:first-of-type{margin-top:0}label{display:block;font-size:13px;font-weight:500;color:#505663;margin-bottom:6px}
     input:not([type=checkbox]){display:block;width:100%;height:38px;padding:8px 11px;border:1px solid #e4e6ec;border-radius:9px;background:#fcfcfd;color:#333946;font-size:13px;outline:none;transition:border .15s,box-shadow .15s}input:not([type=checkbox]):focus{border-color:#ee8da0;box-shadow:0 0 0 3px #fdf0f3;background:#fff}input::placeholder{color:#b0b5bf}.field-hint{font-size:11px;color:#858d99;margin-top:5px;line-height:1.6}
     .check{display:flex;align-items:center;gap:7px;margin:12px 0 15px;font-size:12px;font-weight:400;color:#737c89;cursor:pointer}.check input{appearance:auto;accent-color:#e74764;width:13px;height:13px;margin:0}
-    .actions{display:flex;gap:8px}.actions button{height:39px;border:1px solid #e4e6ec;border-radius:9px;padding:0 14px;background:#fff;color:#667080;font-size:13px;font-weight:500}.actions button:hover{background:#f7f8fa}.actions .primary{flex:1;background:#e74764;color:#fff;border-color:#e74764;box-shadow:0 3px 7px #e7476414}.actions .primary:hover{background:#d73b57;border-color:#d73b57}
-    .cache-row{display:flex;justify-content:flex-end;margin-top:16px;padding-top:13px;border-top:1px solid #f0f1f4}.text-button{padding:5px 0;border:0;background:none;color:#737e8d;font-size:12px}.text-button:hover{color:#d73b57}
+    .actions{display:flex;gap:8px}.actions button{height:39px;white-space:nowrap;border:1px solid #e4e6ec;border-radius:9px;padding:0 14px;background:#fff;color:#667080;font-size:13px;font-weight:500}.actions button:hover{background:#f7f8fa}.actions .primary{flex:1;background:#e74764;color:#fff;border-color:#e74764;box-shadow:0 3px 7px #e7476414}.actions .primary:hover{background:#d73b57;border-color:#d73b57}
     @media(prefers-reduced-motion:reduce){button,input{transition:none}button:active{transform:none}}
-    @media(max-width:420px){.header{padding:17px 18px 15px}.content{padding:0 18px 17px}.panel{border-radius:18px}}
+    @media(max-width:420px){.header{padding:17px 18px 15px}.content{padding:0 18px 17px}.actions{gap:6px}.actions button{padding:0 10px}.panel{border-radius:18px}}
   `;
   root.append(style);
   const el = (tag, text, parent = root, className = '') => {
@@ -524,8 +523,7 @@ class TranslationEngine {
   const row = el('div', '', content, 'actions');
   const start = el('button', '保存并开启', row, 'primary');
   const pause = el('button', '暂停', row);
-  const cacheRow = el('div', '', content, 'cache-row');
-  const clear = el('button', '清除缓存', cacheRow, 'text-button');
+  const clear = el('button', '清除缓存', row);
   const toggle = el('button', '', root, 'toggle');
   icon('translate', toggle);
   el('span', 'AI 翻译', toggle);
