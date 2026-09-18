@@ -17,16 +17,28 @@ test('persists across instances without storing API credentials', () => {
   assert.equal(second.get('ホーム'), '首页');
   assert.deepEqual(Object.keys(backing.read()).sort(), ['entries', 'scope', 'version']);
 });
-test('expires translations and isolates provider/model changes', () => {
+test('translations do not expire with time and provider/model changes remain isolated', t => {
   const backing = storage();
-  let clock = 1000;
-  const cache = new TranslationCache({ ...backing, now: () => clock, ttl: 100 });
+  const cache = new TranslationCache(backing);
+  t.mock.method(Date, 'now', () => 1000);
   cache.load('provider/model-a'); cache.set('解説', '解析'); cache.flush();
   cache.load('provider/model-b'); assert.equal(cache.get('解説'), undefined);
+  t.mock.method(Date, 'now', () => 1000 + 10 * 365 * 24 * 60 * 60 * 1000);
   cache.load('provider/model-a'); assert.equal(cache.get('解説'), '解析');
-  clock = 1100;
-  assert.equal(cache.get('解説'), undefined);
-  cache.load('provider/model-a'); assert.equal(cache.get('解説'), undefined);
+  assert.equal(backing.read().version, 2);
+  assert.deepEqual(backing.read().entries, [['解説', '解析']]);
+});
+test('preserves legacy translations even after their former expiry and writes v2 format', () => {
+  const backing = storage();
+  backing.write({ version: 1, scope: 'test', entries: [['ホーム', '首页', 0]] });
+  const cache = new TranslationCache(backing);
+  cache.load('test');
+  assert.equal(cache.get('ホーム'), '首页');
+  cache.set('解説', '解析'); cache.flush();
+  assert.equal(backing.read().version, 2);
+  assert.ok(backing.read().entries.every(entry => entry.length === 2));
+  const reopened = new TranslationCache(backing); reopened.load('test');
+  assert.equal(reopened.get('ホーム'), '首页');
 });
 test('bounds storage and retains recently accessed menu labels', () => {
   const cache = new TranslationCache({ limit: 2, maxChars: 100 });

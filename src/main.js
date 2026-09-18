@@ -86,7 +86,7 @@ import { TranslationCache } from './cache.js';
   const cacheRow = el('div', '', content, 'cache-row');
   const cacheInfo = el('div', '', cacheRow);
   el('p', '本地翻译缓存', cacheInfo, 'cache-title');
-  el('p', '保留 30 天 · 再次访问直接显示', cacheInfo, 'cache-note');
+  el('p', '不自动过期 · 再次访问直接显示', cacheInfo, 'cache-note');
   const clear = el('button', '清除缓存', cacheRow, 'text-button');
   const footer = el('div', '', panel, 'footer');
   el('p', '新内容由 AI 处理并可能计费，请关闭浏览器整页翻译。', footer, 'foot');
