@@ -102,9 +102,9 @@ export function parseResponse(raw, protectedTexts) {
   });
 }
 
-function createRequestTranslator(gmRequest) {
+export function createRequestTranslator(gmRequest, buildRequest = makeRequest, parse = parseResponse) {
   return (texts, config, signal) => new Promise((resolve, reject) => {
-    const { protectedTexts, body } = makeRequest(texts, config.model);
+    const { protectedTexts, body } = buildRequest(texts, config.model);
     // DeepSeek enables thinking by default; translation prioritizes response speed.
     if (new URL(config.endpoint).hostname === 'api.deepseek.com') {
       body.thinking = { type: 'disabled' };
@@ -139,7 +139,7 @@ function createRequestTranslator(gmRequest) {
             finish(new Error(`AI 接口返回 HTTP ${response.status}。${advice}`));
             return;
           }
-          try { finish(null, parseResponse(response.responseText, protectedTexts)); }
+          try { finish(null, parse(response.responseText, protectedTexts)); }
           catch (error) { finish(error); }
         },
         onerror: () => finish(new Error('无法连接 AI 接口，请检查网络和 Tampermonkey 的域名访问许可。')),

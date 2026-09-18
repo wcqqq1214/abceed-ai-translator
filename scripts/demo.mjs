@@ -15,10 +15,10 @@ window.GM_registerMenuCommand=()=>{};
 let requestCount=0;
 window.GM_xmlhttpRequest=options=>{
   document.querySelector('#request-count').textContent='本次页面模拟 AI 请求：'+(++requestCount)+' 次';
-  const entries=JSON.parse(JSON.parse(options.data).messages[1].content).entries;
+  const {entries=[],word}=JSON.parse(JSON.parse(options.data).messages[1].content);
   const dictionary={'英語の練習':'英语练习','問題':'题目','正しい答えを選んでください。':'请选择正确答案。','解説を見る':'查看解析','この文は受動態です。':'这句话使用了被动语态。','次の問題':'下一题'};
   const translations=entries.map(({id,text})=>({id,text:dictionary[text]||text.replace('は過去分詞です。','是过去分词。')}));
-  const timer=setTimeout(()=>options.onload({status:200,responseText:JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({translations})}}]})}),250);
+  const timer=setTimeout(()=>options.onload({status:200,responseText:JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify(word?{meaning:"动词：推迟，延期。"}:{translations})}}]})}),250);
   return {abort(){clearTimeout(timer);options.onabort();}};
 };
 document.querySelector('#reveal').onclick=()=>{document.querySelector('#explanation').hidden=false;};

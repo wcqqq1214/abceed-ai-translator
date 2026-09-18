@@ -1,6 +1,7 @@
 import { normalizeConfig, createTranslator } from './core.js';
 import { TranslationEngine } from './engine.js';
 import { TranslationCache } from './cache.js';
+import { WordLookup, createWordTranslator } from './words.js';
 
 (() => {
   if (document.querySelector('[data-abceed-ai-ui]')) return;
@@ -122,7 +123,14 @@ import { TranslationCache } from './cache.js';
   key.value = GM_getValue('apiKey', '');
   remember.checked = Boolean(key.value);
 
+  const words = new WordLookup({ doc: document, win: window, root,
+    getConfig: () => normalizeConfig({ endpoint: endpoint.value, model: model.value, key: key.value }),
+    translate: createWordTranslator(GM_xmlhttpRequest),
+    cache: new TranslationCache({ read: () => GM_getValue('wordCache', undefined), write: snapshot => GM_setValue('wordCache', snapshot) })
+  });
+
   start.onclick = () => {
+    words.hide();
     engine.pause();
     GM_setValue('config', { ...GM_getValue('config', {}), enabled: false });
     try {
@@ -138,7 +146,7 @@ import { TranslationCache } from './cache.js';
     engine.pause();
     GM_setValue('config', { ...GM_getValue('config', {}), enabled: false });
   };
-  clear.onclick = () => { engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
+  clear.onclick = () => { words.clearCache(); engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
   GM_registerMenuCommand('abceed AI 翻译设置', () => show(true));
   if (saved.enabled && key.value) {
     try { engine.start(normalizeConfig({ ...saved, key: key.value })); }
