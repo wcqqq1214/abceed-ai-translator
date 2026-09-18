@@ -11,9 +11,9 @@ const header = `// ==UserScript==
 // @author       wcqqq1214
 // @license      MIT
 // @match        https://app.abceed.com/*
+// @match        https://private.abceed.com/contents/*
 // @run-at       document-idle
 // @sandbox      DOM
-// @noframes
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
@@ -26,7 +26,7 @@ const header = `// ==UserScript==
 // @updateURL    ${raw}
 // ==/UserScript==
 `;
-const sources = await Promise.all(['core', 'cache', 'engine', 'words', 'main'].map(async name => {
+const sources = await Promise.all(['core', 'cache', 'engine', 'words', 'frames', 'main'].map(async name => {
   const source = await readFile(new URL(`src/${name}.js`, project), 'utf8');
   return source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
 }));

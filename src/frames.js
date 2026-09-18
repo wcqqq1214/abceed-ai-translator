@@ -1,0 +1,90 @@
+import { WordLookup } from './words.js';
+
+const FRAME_CHANNEL = 'abceed-ai-lookup-v1';
+const APP_ORIGIN = 'https://app.abceed.com';
+const CONTENT_ORIGIN = 'https://private.abceed.com';
+
+export function attachFrameBridge({ win, doc, getConfig, translate, translateSelection, cache }) {
+  const pending = new Map();
+  const cancelAll = () => { for (const controller of pending.values()) controller.abort(); pending.clear(); };
+  const onMessage = async event => {
+    const data = event.data;
+    if (event.origin !== CONTENT_ORIGIN || !data || data.channel !== FRAME_CHANNEL ||
+      typeof data.id !== 'string' || data.id.length > 100 ||
+      !Array.from(doc.querySelectorAll('iframe')).some(frame => frame.contentWindow === event.source)) return;
+    if (data.type === 'cancel') { const current = pending.get(event.source); if (current?.requestId === data.id) { current.abort(); pending.delete(event.source); } return; }
+    if (data.type !== 'request' || !['word', 'selection'].includes(data.mode) ||
+      typeof data.text !== 'string' || !data.text.trim() || data.text.length > (data.mode === 'word' ? 60 : 3000)) return;
+    pending.get(event.source)?.abort();
+    const controller = new AbortController();
+    controller.requestId = data.id;
+    pending.set(event.source, controller);
+    const reply = payload => {
+      if (!controller.signal.aborted && Array.from(doc.querySelectorAll('iframe')).some(frame => frame.contentWindow === event.source))
+        event.source.postMessage({ channel: FRAME_CHANNEL, type: 'response', id: data.id, ...payload }, CONTENT_ORIGIN);
+    };
+    try {
+      const config = getConfig();
+      const scope = `${config.endpoint}\n${config.model}`;
+      if (cache.scope !== scope) cache.load(scope);
+      const key = data.mode === 'word' ? data.text : `selection:${data.text}`;
+      let result = cache.get(key);
+      if (result === undefined) {
+        result = await (data.mode === 'word' ? translate : translateSelection)(data.text, config, controller.signal);
+        if (controller.signal.aborted) return;
+        cache.set(key, result); cache.flush();
+      }
+      reply({ result });
+    } catch (error) { reply({ error: error.message }); }
+    finally { if (pending.get(event.source) === controller) pending.delete(event.source); }
+  };
+  win.addEventListener('message', onMessage);
+  return { cancelAll, destroy() { cancelAll(); win.removeEventListener('message', onMessage); } };
+}
+
+export function createFrameRequester(win) {
+  return (mode, text, config, signal) => new Promise((resolve, reject) => {
+    const id = win.crypto.randomUUID();
+    let timer;
+    const finish = (error, result) => {
+      win.clearTimeout(timer);
+      win.removeEventListener('message', receive);
+      signal?.removeEventListener('abort', abort);
+      if (error) reject(error); else resolve(result);
+    };
+    const abort = () => {
+      win.parent.postMessage({ channel: FRAME_CHANNEL, type: 'cancel', id }, APP_ORIGIN);
+      finish(new Error('翻译已暂停。'));
+    };
+    const receive = event => {
+      const data = event.data;
+      if (event.source !== win.parent || event.origin !== APP_ORIGIN || data?.channel !== FRAME_CHANNEL || data.type !== 'response' || data.id !== id) return;
+      if (typeof data.error === 'string') finish(new Error(data.error));
+      else if (typeof data.result === 'string') finish(null, data.result);
+    };
+    if (signal?.aborted) { finish(new Error('翻译已暂停。')); return; }
+    win.addEventListener('message', receive);
+    signal?.addEventListener('abort', abort, { once: true });
+    timer = win.setTimeout(() => { abort(); }, 75000);
+    win.parent.postMessage({ channel: FRAME_CHANNEL, type: 'request', id, mode, text }, APP_ORIGIN);
+  });
+}
+
+export function attachContentLookup(doc, win) {
+  if (win.location.origin !== CONTENT_ORIGIN) return;
+  const host = doc.createElement('div');
+  host.setAttribute('data-abceed-ai-ui', '');
+  host.style.cssText = 'position:fixed;z-index:2147483647;';
+  const root = host.attachShadow({ mode: 'closed' });
+  const style = doc.createElement('style');
+  style.textContent = ':host{all:initial;font:13px/1.5 "PingFang SC",sans-serif;color-scheme:light}*{box-sizing:border-box}[hidden]{display:none!important}p{margin:0}button{font:inherit;cursor:pointer}';
+  root.append(style);
+  doc.documentElement.append(host);
+  const request = createFrameRequester(win);
+  // Persistent cache and provider settings stay in the parent; frames never receive keys.
+  const cache = { scope: '', load(scope) { this.scope = scope; }, get() {}, set() {}, flush() {}, clear() {} };
+  return new WordLookup({ doc, win, root, cache, getConfig: () => ({ endpoint: APP_ORIGIN, model: 'parent' }),
+    translate: (text, config, signal) => request('word', text, config, signal),
+    translateSelection: (text, config, signal) => request('selection', text, config, signal)
+  });
+}

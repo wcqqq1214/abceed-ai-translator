@@ -1,3 +1,4 @@
+import { attachFrameBridge, attachContentLookup } from './frames.js';
 import { normalizeConfig, createTranslator } from './core.js';
 import { TranslationEngine } from './engine.js';
 import { TranslationCache } from './cache.js';
@@ -5,6 +6,7 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
 
 (() => {
   if (document.querySelector('[data-abceed-ai-ui]')) return;
+  if (window.top !== window) { attachContentLookup(document, window); return; }
   const host = document.createElement('div');
   host.setAttribute('data-abceed-ai-ui', '');
   host.setAttribute('translate', 'no');
@@ -130,7 +132,11 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
     cache: new TranslationCache({ read: () => GM_getValue('wordCache', undefined), write: snapshot => GM_setValue('wordCache', snapshot) })
   });
 
+  const frameBridge = attachFrameBridge({ win: window, doc: document, getConfig: words.getConfig,
+    translate: words.translate, translateSelection: words.translateSelection, cache: words.cache });
+
   start.onclick = () => {
+    frameBridge.cancelAll();
     words.hide();
     engine.pause();
     GM_setValue('config', { ...GM_getValue('config', {}), enabled: false });
@@ -147,7 +153,7 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
     engine.pause();
     GM_setValue('config', { ...GM_getValue('config', {}), enabled: false });
   };
-  clear.onclick = () => { words.clearCache(); engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
+  clear.onclick = () => { frameBridge.cancelAll(); words.clearCache(); engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
   GM_registerMenuCommand('abceed AI 翻译设置', () => show(true));
   if (saved.enabled && key.value) {
     try { engine.start(normalizeConfig({ ...saved, key: key.value })); }
