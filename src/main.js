@@ -1,3 +1,4 @@
+import { attachPlayerKeys } from './player.js';
 import { RequestScheduler } from './scheduler.js';
 import { checkForUpdate } from './updates.js';
 import { attachFrameBridge, attachContentLookup, attachAutoFrameBridge } from './frames.js';
@@ -8,6 +9,7 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
 
 (() => {
   if (document.querySelector('[data-abceed-ai-ui]')) return;
+  attachPlayerKeys(document, window);
   if (window.top !== window) { attachContentLookup(document, window); return; }
   // The site's selection toolbar duplicates the AI lookup popup.
   const selectionStyle = document.createElement('style');

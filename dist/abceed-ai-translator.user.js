@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.7.0
+// @version      1.8.0
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -649,6 +649,90 @@ class TranslationEngine {
   }
 }
 
+const PLAYER_CHANNEL = 'abceed-player-keys-v1';
+const PLAYER_APP = 'https://app.abceed.com';
+const PLAYER_CONTENT = 'https://private.abceed.com';
+const PLAYER_ACTIONS = { ArrowLeft: 'back', ArrowRight: 'forward', ' ': 'toggle' };
+
+function playerButtonVisible(element) {
+  if (!element || element.closest('[hidden],[inert],[aria-hidden="true"],[aria-disabled="true"],.disabled,.is-disabled') || element.disabled) return false;
+  const win = element.ownerDocument.defaultView;
+  const rect = element.getBoundingClientRect();
+  const style = win.getComputedStyle(element);
+  return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < win.innerHeight && rect.left < win.innerWidth && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
+}
+
+function playerControls(doc) {
+  const candidates = [...doc.querySelectorAll('.sound-controller-main-component')].map(container => {
+    // Verified abceed layout: previous track, -3s, play/pause, +3s, next track.
+    const buttons = [...container.querySelectorAll(':scope > a.sound-controller_item')];
+    return buttons.length === 5 ? { back: buttons[1], toggle: buttons[2], forward: buttons[3] } : null;
+  }).filter(controls => controls && Object.values(controls).some(playerButtonVisible));
+  if (candidates.length !== 1) return {};
+  return Object.fromEntries(Object.entries(candidates[0]).filter(([, button]) => playerButtonVisible(button)));
+}
+
+function playerKeyAction(event) {
+  if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+  const action = PLAYER_ACTIONS[event.key];
+  if (!action) return null;
+  const excluded = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[data-abceed-ai-ui],[role="textbox"],[role="slider"],[role="combobox"],[role="listbox"],[role="menu"],[role="tablist"]';
+  for (const node of event.composedPath()) {
+    if (node.closest?.(excluded)) return null;
+    if (action === 'toggle' && node.closest?.('button,a[href],summary,[role="button"],[role="checkbox"],[role="switch"]')) return null;
+  }
+  return action;
+}
+
+function attachPlayerKeys(doc, win) {
+  const embedded = win.top !== win;
+  if (embedded && win.location.origin !== PLAYER_CONTENT) return { destroy() {} };
+  let available = {}, timer;
+  const execute = action => {
+    const button = playerControls(doc)[action];
+    if (!button) return false;
+    button.click();
+    return true;
+  };
+  const onKey = event => {
+    const action = playerKeyAction(event);
+    if (!action || !(embedded ? available[action] : playerControls(doc)[action])) return;
+    // Holding Space must not rapidly toggle playback. Arrow repeats remain useful.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (action === 'toggle' && event.repeat) return;
+    if (embedded) win.parent.postMessage({ channel: PLAYER_CHANNEL, type: 'action', action }, PLAYER_APP);
+    else execute(action);
+  };
+  const query = () => win.parent.postMessage({ channel: PLAYER_CHANNEL, type: 'query' }, PLAYER_APP);
+  const onMessage = event => {
+    const data = event.data;
+    if (data?.channel !== PLAYER_CHANNEL) return;
+    if (embedded) {
+      if (event.source === win.parent && event.origin === PLAYER_APP && data.type === 'state') {
+        available = Object.fromEntries(['back', 'toggle', 'forward'].map(action => [action, data.available?.[action] === true]));
+      }
+      return;
+    }
+    if (event.origin !== PLAYER_CONTENT) return;
+    const frame = [...doc.querySelectorAll('iframe')].find(frame => frame.contentWindow === event.source);
+    if (!frame) return;
+    if (data.type === 'query') {
+      const controls = playerControls(doc);
+      event.source.postMessage({ channel: PLAYER_CHANNEL, type: 'state', available: Object.fromEntries(Object.keys(controls).map(action => [action, true])) }, PLAYER_CONTENT);
+    } else if (data.type === 'action' && doc.activeElement === frame && ['back', 'toggle', 'forward'].includes(data.action)) execute(data.action);
+  };
+  doc.addEventListener('keydown', onKey, true);
+  win.addEventListener('message', onMessage);
+  if (embedded) { query(); timer = win.setInterval(query, 500); win.addEventListener('focus', query); }
+  return { destroy() {
+    doc.removeEventListener('keydown', onKey, true);
+    win.removeEventListener('message', onMessage);
+    win.removeEventListener('focus', query);
+    win.clearInterval(timer);
+  } };
+}
+
 
 const ENGLISH_WORD = /^[A-Za-z]+(?:['’\-‐‑][A-Za-z]+)*$/;
 const WORD_EXCLUDE = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[data-abceed-ai-ui]';
@@ -1183,6 +1267,7 @@ function attachContentAutoTranslation(doc, win, request) {
 
 (() => {
   if (document.querySelector('[data-abceed-ai-ui]')) return;
+  attachPlayerKeys(document, window);
   if (window.top !== window) { attachContentLookup(document, window); return; }
   // The site's selection toolbar duplicates the AI lookup popup.
   const selectionStyle = document.createElement('style');
@@ -1280,7 +1365,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.7.0', updateGroup, 'version');
+  el('span', 'v1.8.0', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1288,7 +1373,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.7.0');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.8.0');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;
