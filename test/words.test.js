@@ -287,3 +287,77 @@ test('tight embedded viewports use side space and full-screen selections remain 
   const full = selectionPopupPosition({ left: 0, right: 340, top: 0, bottom: 180 }, 280, 160, 340, 180);
   assert.ok(full.top >= 0 && full.top + full.maxHeight <= 180);
 });
+
+function speechSetup() {
+  const fixture = setup(async () => '中文释义');
+  const spoken = [];
+  let cancellations = 0;
+  const local = { lang: 'en-US', localService: true };
+  fixture.dom.window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+  fixture.dom.window.speechSynthesis = {
+    getVoices: () => [{ lang: 'zh-CN', localService: true }, { lang: 'en-US', localService: false }, local],
+    speak: utterance => spoken.push(utterance),
+    cancel: () => cancellations++
+  };
+  return { ...fixture, spoken, local, cancellations: () => cancellations };
+}
+
+test('pronunciation is opt-in, reads original compound words and sentences, and toggles stop', async () => {
+  const { dom, words, spoken, local, cancellations } = speechSetup();
+  words.translateSelection = async () => '这是句子。';
+  await words.lookup('hands-on', 10, 10);
+  assert.equal(spoken.length, 0);
+  words.speakButton.click();
+  assert.equal(spoken[0].text, 'hands-on');
+  assert.equal(spoken[0].voice, local);
+  assert.equal(spoken[0].lang, 'en-US');
+  assert.equal(spoken[0].rate, 1);
+  assert.equal(words.speakButton.getAttribute('aria-label'), '停止发音');
+  words.speakButton.click();
+  assert.equal(cancellations(), 1);
+  assert.equal(words.speakButton.getAttribute('aria-pressed'), 'false');
+  await words.lookup('We need hands-on experience.', 10, 10, 'selection');
+  words.speakButton.click();
+  assert.equal(spoken[1].text, 'We need hands-on experience.');
+  spoken[1].onend();
+  assert.equal(words.speakButton.getAttribute('aria-pressed'), 'false');
+  words.destroy(); dom.window.close();
+});
+
+test('closing, replacing a selection and navigation cancel speech and ignore stale callbacks', async () => {
+  const { dom, words, spoken, cancellations } = speechSetup();
+  await words.lookup('first', 10, 10);
+  words.speakButton.click();
+  const oldEnd = spoken[0].onend;
+  await words.lookup('second', 10, 10);
+  assert.equal(cancellations(), 1);
+  words.speakButton.click();
+  oldEnd();
+  assert.equal(words.speakButton.getAttribute('aria-pressed'), 'true');
+  dom.window.dispatchEvent(new dom.window.Event('popstate'));
+  assert.equal(cancellations(), 2);
+  assert.equal(words.popup.hidden, true);
+  await words.lookup('third', 10, 10);
+  words.speakButton.click();
+  words.hide();
+  assert.equal(cancellations(), 3);
+  words.destroy(); dom.window.close();
+});
+
+test('speech errors preserve meaning and allow retry; unsupported browsers hide the button', async () => {
+  const { dom, words, spoken } = speechSetup();
+  await words.lookup('test', 10, 10);
+  words.speakButton.click();
+  spoken[0].onerror({ error: 'synthesis-failed' });
+  assert.equal(words.speechError.hidden, false);
+  assert.equal(words.meaning.textContent, '中文释义');
+  assert.equal(words.speakButton.getAttribute('aria-pressed'), 'false');
+  words.speakButton.click();
+  assert.equal(spoken.length, 2);
+  assert.equal(words.speechError.hidden, true);
+  words.hide();
+  delete dom.window.speechSynthesis;
+  await words.lookup('test', 10, 10);
+  assert.equal(words.speakButton.hidden, true);
+  words.destroy(); dom.window.close();
+});

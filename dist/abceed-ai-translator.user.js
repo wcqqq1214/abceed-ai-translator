@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.6.3
+// @version      1.7.0
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -788,7 +788,8 @@ class WordLookup {
     Object.assign(this, { doc, win, root, getConfig, translate, translateSelection, cache });
     this.generation = 0;
     const style = doc.createElement('style');
-    style.textContent = `.word-popup{position:fixed;box-sizing:border-box;width:max-content;min-width:min(200px,calc(100vw - 24px));max-width:min(320px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:14px 16px;background:#fff;border:1px solid #e9eaed;border-radius:14px;box-shadow:0 4px 18px #17203312,0 1px 3px #17203308;color:#343a43;text-align:left;font:400 14px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;scrollbar-width:thin}.word-popup[data-mode=selection]{max-width:min(420px,calc(100vw - 24px))}.word-heading{display:flex;align-items:center;gap:16px}.word-title{flex:1;font-size:17px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}.word-popup[data-mode=selection] .word-title{font-size:11px;font-weight:400;letter-spacing:.03em;color:#9097a1}.word-close{display:grid;place-items:center;flex:none;width:22px;height:22px;border:0;border-radius:6px;background:none;color:#9aa1aa;font:400 18px/1 sans-serif;padding:0;cursor:pointer}.word-close:hover{background:#f4f5f7;color:#505966}.word-close:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-meaning{margin:8px 0 0;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.meaning-row{display:block}.meaning-row+.meaning-row{margin-top:5px}.meaning-pos{color:#929aa5;font-size:12px}.word-popup[data-loading=true] .word-meaning{font-size:12px;color:#929aa5}`;
+    style.textContent = `.word-popup{position:fixed;box-sizing:border-box;width:max-content;min-width:min(200px,calc(100vw - 24px));max-width:min(320px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:14px 16px;background:#fff;border:1px solid #e9eaed;border-radius:14px;box-shadow:0 4px 18px #17203312,0 1px 3px #17203308;color:#343a43;text-align:left;font:400 14px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;scrollbar-width:thin}.word-popup[data-mode=selection]{max-width:min(420px,calc(100vw - 24px))}.word-heading{display:flex;align-items:center;gap:10px}.word-title{flex:1;font-size:17px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}.word-popup[data-mode=selection] .word-title{font-size:11px;font-weight:400;letter-spacing:.03em;color:#9097a1}.word-close{display:grid;place-items:center;flex:none;width:22px;height:22px;border:0;border-radius:6px;background:none;color:#9aa1aa;font:400 18px/1 sans-serif;padding:0;cursor:pointer}.word-close:hover{background:#f4f5f7;color:#505966}.word-close:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-meaning{margin:8px 0 0;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.meaning-row{display:block}.meaning-row+.meaning-row{margin-top:5px}.meaning-pos{color:#929aa5;font-size:12px}.word-popup[data-loading=true] .word-meaning{font-size:12px;color:#929aa5}`;
+    style.textContent += `.word-speak{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:5px;border:0;border-radius:8px;background:none;color:#929aa5;cursor:pointer}.word-speak:hover{background:#f5f6f8;color:#505966}.word-speak[aria-pressed=true]{color:#ed627e;background:#fff1f4}.word-speak:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-speak svg{width:18px;height:18px}.word-speech-error{margin:6px 0 0;color:#929aa5;font-size:12px}[hidden]{display:none!important}`;
     root.append(style);
     this.popup = doc.createElement('section');
     this.popup.className = 'word-popup';
@@ -803,17 +804,28 @@ class WordLookup {
     close.textContent = '×';
     close.setAttribute('aria-label', '关闭翻译结果');
     close.onclick = () => this.hide();
-    heading.append(this.title, close);
+    this.speakButton = doc.createElement('button');
+    this.speakButton.type = 'button';
+    this.speakButton.className = 'word-speak';
+    this.speakButton.onclick = () => this.toggleSpeech();
+    this.setSpeaking(false);
+    this.speechError = doc.createElement('p');
+    this.speechError.className = 'word-speech-error';
+    this.speechError.setAttribute('role', 'status');
+    this.speechError.hidden = true;
+    heading.append(this.title, this.speakButton, close);
     this.meaning = doc.createElement('p');
     this.meaning.className = 'word-meaning';
     this.meaning.setAttribute('role', 'status');
-    this.popup.append(heading, this.meaning);
+    this.popup.append(heading, this.meaning, this.speechError);
     root.append(this.popup);
     this.onDoubleClick = event => {
+      if (event.composedPath().includes(this.popup)) return;
       const word = selectedEnglishWord(doc, event.target);
       if (word) void this.lookup(word, event.clientX, event.clientY, 'word', doc.getSelection().getRangeAt(0).getBoundingClientRect());
     };
     this.onSelection = event => {
+      if (event.composedPath().includes(this.popup)) return;
       if (!this.translateSelection || event.button !== 0 || event.detail >= 2) return;
       const text = selectedEnglishText(doc, event.target);
       if (text) void this.lookup(text, event.clientX, event.clientY, ENGLISH_WORD.test(text) && text.length <= 60 ? 'word' : 'selection', doc.getSelection().getRangeAt(0).getBoundingClientRect());
@@ -842,7 +854,62 @@ class WordLookup {
     this.pageTimer = win.setInterval(this.checkPage, 250);
   }
 
+  setSpeaking(active) {
+    this.speakButton.setAttribute('aria-pressed', String(active));
+    this.speakButton.setAttribute('aria-label', active ? '停止发音' : '朗读英文');
+    this.speakButton.title = active ? '停止发音' : '朗读英文';
+    this.speakButton.innerHTML = active
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14"/></svg>';
+  }
+
+  stopSpeech() {
+    const utterance = this.utterance;
+    this.utterance = undefined;
+    if (utterance) {
+      utterance.onend = utterance.onerror = null;
+      this.win.speechSynthesis.cancel();
+    }
+    this.setSpeaking(false);
+  }
+
+  toggleSpeech() {
+    if (this.utterance) { this.stopSpeech(); return; }
+    if (this.popup.hidden || !this.speechText || !this.win.speechSynthesis || !this.win.SpeechSynthesisUtterance) return;
+    this.speechError.hidden = true;
+    try {
+      const utterance = new this.win.SpeechSynthesisUtterance(this.speechText);
+      utterance.lang = 'en-US';
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      const voices = this.win.speechSynthesis.getVoices();
+      const american = voices.filter(voice => /^en[-_]US$/i.test(voice.lang));
+      const voice = american.find(voice => voice.localService) || american[0];
+      if (voice) utterance.voice = voice;
+      this.utterance = utterance;
+      const finish = error => {
+        if (this.utterance !== utterance) return;
+        this.utterance = undefined;
+        this.setSpeaking(false);
+        if (error) this.showSpeechError();
+      };
+      utterance.onend = () => finish(false);
+      utterance.onerror = () => finish(true);
+      this.setSpeaking(true);
+      this.win.speechSynthesis.speak(utterance);
+    } catch {
+      this.stopSpeech();
+      this.showSpeechError();
+    }
+  }
+
+  showSpeechError() {
+    this.speechError.textContent = '暂时无法发音，请点击重试。';
+    this.speechError.hidden = false;
+  }
+
   hide() {
+    this.stopSpeech();
     this.generation++;
     this.controller?.abort();
     this.popup.hidden = true;
@@ -892,6 +959,9 @@ class WordLookup {
     this.sourceNode = selection?.rangeCount && selection.toString().trim() === word
       ? selection.getRangeAt(0).commonAncestorContainer : undefined;
     this.sourceText = this.sourceNode?.textContent;
+    this.speechText = word;
+    this.speakButton.hidden = !this.win.speechSynthesis || !this.win.SpeechSynthesisUtterance;
+    this.speechError.hidden = true;
     this.popup.hidden = false;
     this.popup.dataset.mode = mode;
     this.popup.dataset.loading = 'true';
@@ -1210,7 +1280,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.6.3', updateGroup, 'version');
+  el('span', 'v1.7.0', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1218,7 +1288,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.6.3');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.7.0');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;
