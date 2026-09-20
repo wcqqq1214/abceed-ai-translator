@@ -25,6 +25,16 @@ test('source cannot collide with English placeholder namespace', () => {
   const part = protectEnglish('ABCEED_KEEP_0 は文字です。');
   assert.match(part.values[0].token, /KEEP_X/);
 });
+
+test('mixed paragraphs protect English line breaks and Unicode whitespace byte-for-byte', () => {
+  for (const space of ['\n', '\r\n', '\u00a0', '\u202f', '\u2003', '\t']) {
+    const english = `New${space}York`;
+    const { protectedTexts } = makeRequest([`「${english}」は地名です。`], 'test');
+    assert.deepEqual(protectedTexts[0].values.map(part => part.value), [english]);
+    const text = `“${protectedTexts[0].values[0].token}”是地名。`;
+    assert.deepEqual(parseResponse(envelope([{ id: '0', text }]), protectedTexts), [`“${english}”是地名。`]);
+  }
+});
 test('response IDs can be reordered but missing, duplicate or changed English is rejected', () => {
   const request = makeRequest(['解説', '「Good morning.」と言います。'], 'test');
   const token = request.protectedTexts[1].values[0].token;

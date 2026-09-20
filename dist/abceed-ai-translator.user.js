@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.9.0
+// @version      1.9.1
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -51,7 +51,7 @@ function protectEnglish(text) {
   const values = [];
   let prefix = 'ABCEED_KEEP_';
   while (text.includes(prefix)) prefix += 'X';
-  const masked = text.replace(/[\p{Script=Latin}\p{N}][\p{Script=Latin}\p{M}\p{N} \t'’‘"“”.,!?;:()\[\]{}\/%+_=&@#\-–—]*/gu, value => {
+  const masked = text.replace(/[\p{Script=Latin}\p{N}][\p{Script=Latin}\p{M}\p{N}\s'’‘"“”.,!?;:()\[\]{}\/%+_=&@#\-–—]*/gu, value => {
     const token = `⟦${prefix}${values.length}⟧`;
     values.push({ token, value });
     return token;
@@ -343,13 +343,12 @@ async function checkForUpdate(gmRequest, current) {
 }
 
 // Revisions describe translation behavior, not extension releases. Cosmetic updates keep caches.
-const PAGE_TRANSLATION_REVISION = 1;
+const PAGE_TRANSLATION_REVISION = 2; // Preserve whitespace inside English runs.
 const WORD_TRANSLATION_REVISION = 2;
 function translationScope(config, kind = 'page') {
   const base = `${config.endpoint}\n${config.model}`;
   if (kind === 'word') return `${base}\nword-v${WORD_TRANSLATION_REVISION}`;
-  // Keep the existing Japanese cache while its translation policy is unchanged.
-  return PAGE_TRANSLATION_REVISION === 1 ? base : `${base}\npage-v${PAGE_TRANSLATION_REVISION}`;
+  return `${base}\npage-v${PAGE_TRANSLATION_REVISION}`;
 }
 const wordCacheKey = (word, context = '') => context ? `context:${JSON.stringify([word, context])}` : word;
 
@@ -362,10 +361,16 @@ class TranslationCache {
     this.items = new Map();
     this.pending = new Map();
     this.scope = '';
+    this.reset = '';
+    this.needsClear = false;
+  }
+
+  matches(snapshot) {
+    return [1, 2].includes(snapshot?.version) && snapshot.scope === this.scope && Array.isArray(snapshot.entries);
   }
 
   decode(snapshot) {
-    if (![1, 2].includes(snapshot?.version) || snapshot.scope !== this.scope || !Array.isArray(snapshot.entries)) return [];
+    if (!this.matches(snapshot)) return [];
     // Keep existing v1 translations, ignoring their former expiry timestamps.
     return snapshot.entries.filter(entry => Array.isArray(entry) &&
       entry.length === (snapshot.version === 1 ? 3 : 2) &&
@@ -379,10 +384,24 @@ class TranslationCache {
     this.scope = scope;
     this.items.clear();
     this.pending.clear();
+    this.reset = '';
+    this.needsClear = false;
     try {
-      for (const [source, text] of this.decode(this.read())) this.items.set(source, { text });
+      const snapshot = this.read();
+      this.syncReset(snapshot);
+      for (const [source, text] of this.decode(snapshot)) this.items.set(source, { text });
     } catch { /* A storage failure must not prevent translation. */ }
     this.trim();
+  }
+
+  syncReset(snapshot) {
+    if (this.needsClear || !this.matches(snapshot)) return;
+    const reset = typeof snapshot.reset === 'string' ? snapshot.reset : '';
+    if (reset === this.reset) return;
+    // Drop results queued before another tab cleared the cache.
+    this.items.clear();
+    this.pending.clear();
+    this.reset = reset;
   }
 
   trim() {
@@ -408,6 +427,8 @@ class TranslationCache {
   }
 
   set(source, text) {
+    // Check before adding a new result so post-clear translations remain usable.
+    try { this.syncReset(this.read()); } catch { /* Keep working in memory. */ }
     const entry = { text };
     this.items.delete(source);
     this.items.set(source, entry);
@@ -421,24 +442,40 @@ class TranslationCache {
   }
 
   flush() {
-    if (!this.pending.size) return;
+    if (!this.pending.size && !this.needsClear) return;
     try {
-      // Merge only new results, so two tabs do not erase each other's translations.
-      const merged = new Map(this.items);
-      for (const [source, text] of this.decode(this.read())) merged.set(source, { text });
+      const snapshot = this.read();
+      this.syncReset(snapshot);
+      if (!this.pending.size && !this.needsClear) return;
+      // Storage is authoritative for existing entries; only pending results may
+      // add missing keys. Reapply local recency without resurrecting deleted data.
+      const merged = this.needsClear ? new Map() : this.matches(snapshot)
+        ? new Map(this.decode(snapshot).map(([source, text]) => [source, { text }]))
+        : new Map(this.items);
+      for (const source of this.items.keys()) {
+        if (!merged.has(source)) continue;
+        const entry = merged.get(source);
+        merged.delete(source); merged.set(source, entry);
+      }
       for (const [source, entry] of this.pending) { merged.delete(source); merged.set(source, entry); }
       this.items = merged;
       this.trim();
-      this.write({ version: 2, scope: this.scope, entries: [...this.items].map(([source, entry]) => [source, entry.text]) });
+      this.write({ version: 2, scope: this.scope, ...(this.reset ? { reset: this.reset } : {}),
+        entries: [...this.items].map(([source, entry]) => [source, entry.text]) });
       this.pending.clear();
+      this.needsClear = false;
     } catch { /* Keep in-memory results if persistence is unavailable. */ }
   }
 
   clear() {
     this.items.clear();
     this.pending.clear();
-    try { this.write({ version: 2, scope: this.scope, entries: [] }); }
-    catch { /* In-memory clearing remains available. */ }
+    this.reset = crypto.randomUUID();
+    this.needsClear = true;
+    try {
+      this.write({ version: 2, scope: this.scope, reset: this.reset, entries: [] });
+      this.needsClear = false;
+    } catch { /* Retry persistence on flush; in-memory clearing still succeeds. */ }
   }
 }
 
@@ -1335,7 +1372,16 @@ function attachAutoFrameBridge({ win, doc, engine }) {
       }
       engine.cache.flush();
       reply({ result: output });
-    } catch (error) { reply({ error: error.message }); }
+    } catch (error) {
+      // Surface transport failures in the parent, where the user can explicitly retry.
+      // Canceled, superseded or detached frames must not pause a newer session.
+      if (!controller.signal.aborted && engine.active && engine.generation === generation &&
+        Array.from(doc.querySelectorAll('iframe')).some(frame => frame.contentWindow === event.source)) {
+        for (const text of data.text) engine.failed.add(text);
+        engine.pause(`教材翻译失败：${error.message} · 部分内容未翻译，可重试`);
+      }
+      reply({ error: error.message });
+    }
     finally { if (pending.get(event.source)?.controller === controller) pending.delete(event.source); }
   };
   win.addEventListener('message', onMessage);
@@ -1360,7 +1406,13 @@ function attachContentAutoTranslation(doc, win, request) {
         engine.start({ endpoint: APP_ORIGIN, model: state.scope || 'parent' });
         lastRevision = revision;
       }
-    } catch { if (!destroyed && engine.active) engine.pause(); }
+    } catch {
+      if (!destroyed) {
+        if (engine.active) engine.pause();
+        // A failed state poll is a connection interruption, not a failed AI batch.
+        lastRevision = undefined;
+      }
+    }
     finally { polling = false; }
   };
   void sync();
@@ -1469,7 +1521,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.9.0', updateGroup, 'version');
+  el('span', 'v1.9.1', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1477,7 +1529,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.9.0');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.9.1');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;

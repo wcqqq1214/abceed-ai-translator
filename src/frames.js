@@ -138,7 +138,16 @@ export function attachAutoFrameBridge({ win, doc, engine }) {
       }
       engine.cache.flush();
       reply({ result: output });
-    } catch (error) { reply({ error: error.message }); }
+    } catch (error) {
+      // Surface transport failures in the parent, where the user can explicitly retry.
+      // Canceled, superseded or detached frames must not pause a newer session.
+      if (!controller.signal.aborted && engine.active && engine.generation === generation &&
+        Array.from(doc.querySelectorAll('iframe')).some(frame => frame.contentWindow === event.source)) {
+        for (const text of data.text) engine.failed.add(text);
+        engine.pause(`教材翻译失败：${error.message} · 部分内容未翻译，可重试`);
+      }
+      reply({ error: error.message });
+    }
     finally { if (pending.get(event.source)?.controller === controller) pending.delete(event.source); }
   };
   win.addEventListener('message', onMessage);
@@ -163,7 +172,13 @@ export function attachContentAutoTranslation(doc, win, request) {
         engine.start({ endpoint: APP_ORIGIN, model: state.scope || 'parent' });
         lastRevision = revision;
       }
-    } catch { if (!destroyed && engine.active) engine.pause(); }
+    } catch {
+      if (!destroyed) {
+        if (engine.active) engine.pause();
+        // A failed state poll is a connection interruption, not a failed AI batch.
+        lastRevision = undefined;
+      }
+    }
     finally { polling = false; }
   };
   void sync();

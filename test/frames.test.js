@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { attachFrameBridge, createFrameRequester, attachAutoFrameBridge, attachContentAutoTranslation } from '../src/frames.js';
 import { TranslationCache } from '../src/cache.js';
+import { TranslationEngine } from '../src/engine.js';
 
 const channel = 'abceed-ai-lookup-v1';
 const origin = 'https://private.abceed.com';
@@ -145,4 +146,79 @@ test('partial iframe failures preserve valid cache entries and are returned as r
     assert.equal(engine.cache.get('問題'), undefined);
     assert.ok(engine.failed.has('問題'));
   } finally { bridge.destroy(); dom.window.close(); }
+});
+
+test('iframe transport failures pause the parent and explicit retry restarts the child', async () => {
+  const parent = new JSDOM('<iframe></iframe>', { url: 'https://app.abceed.com', pretendToBeVisual: true });
+  const child = new JSDOM('<p>解説</p>', { url: `${origin}/contents/test.html`, pretendToBeVisual: true });
+  const win = parent.window, doc = win.document, source = doc.querySelector('iframe').contentWindow;
+  let fail = true, calls = 0, status;
+  const engine = new TranslationEngine({ doc, win, onStatus: text => { status = text; }, translate: async () => {
+    calls++;
+    if (fail) throw new Error('HTTP 429');
+    return ['解析'];
+  } });
+  engine.schedule = () => {};
+  engine.start(config);
+  const bridge = attachAutoFrameBridge({ win, doc, engine });
+  const pending = new Map();
+  let nextId = 0;
+  source.postMessage = data => {
+    const result = pending.get(data.id);
+    pending.delete(data.id);
+    if (data.error) result.reject(new Error(data.error)); else result.resolve(data.result);
+  };
+  const request = (mode, text) => new Promise((resolve, reject) => {
+    const id = String(nextId++);
+    pending.set(id, { resolve, reject });
+    win.dispatchEvent(new win.MessageEvent('message', { origin, source, data: { channel, type: 'request', id, mode, text } }));
+  });
+  const automatic = attachContentAutoTranslation(child.window.document, child.window, request);
+  automatic.engine.isVisible = () => true;
+  automatic.engine.schedule = () => {};
+  try {
+    await wait(); await automatic.engine.tick();
+    assert.equal(engine.active, false);
+    assert.equal(automatic.engine.active, false);
+    assert.match(status, /HTTP 429.*部分内容未翻译/);
+    assert.ok(engine.failed.has('解説'));
+    fail = false;
+    await automatic.sync(); await automatic.engine.tick();
+    assert.equal(calls, 1, 'polling must not automatically retry failed AI requests');
+    engine.retryFailed(); await automatic.sync(); await automatic.engine.tick();
+    assert.equal(calls, 2);
+    assert.equal(child.window.document.querySelector('p').textContent, '解析');
+    assert.equal(engine.active, true);
+  } finally { automatic.destroy(); bridge.destroy(); engine.destroy(); child.window.close(); win.close(); }
+});
+
+test('a canceled iframe request cannot pause the parent when its rejection arrives', async () => {
+  const dom = new JSDOM('<iframe></iframe>', { url: 'https://app.abceed.com', pretendToBeVisual: true });
+  const win = dom.window, doc = win.document, source = doc.querySelector('iframe').contentWindow;
+  let reject;
+  const engine = new TranslationEngine({ doc, win, translate: () => new Promise((_, fail) => { reject = fail; }) });
+  engine.schedule = () => {}; engine.start(config);
+  const bridge = attachAutoFrameBridge({ win, doc, engine });
+  source.postMessage = () => {};
+  try {
+    win.dispatchEvent(new win.MessageEvent('message', { origin, source, data: { channel, id: 'cancel', type: 'request', mode: 'auto', text: ['解説'] } }));
+    bridge.cancelAll(); reject(new Error('翻译已暂停。')); await wait();
+    assert.equal(engine.active, true);
+    assert.equal(engine.failed.size, 0);
+  } finally { bridge.destroy(); engine.destroy(); win.close(); }
+});
+
+test('a transient state polling failure recovers even when the parent revision is unchanged', async () => {
+  const dom = new JSDOM('<p>解説</p>', { url: `${origin}/contents/test.html`, pretendToBeVisual: true });
+  let fail = false;
+  const automatic = attachContentAutoTranslation(dom.window.document, dom.window, async () => {
+    if (fail) throw new Error('state timeout');
+    return { enabled: true, revision: 1, scope: 'test' };
+  });
+  automatic.engine.schedule = () => {};
+  try {
+    await wait(); assert.equal(automatic.engine.active, true);
+    fail = true; await automatic.sync(); assert.equal(automatic.engine.active, false);
+    fail = false; await automatic.sync(); assert.equal(automatic.engine.active, true);
+  } finally { automatic.destroy(); dom.window.close(); }
 });

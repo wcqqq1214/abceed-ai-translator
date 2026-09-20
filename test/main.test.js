@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom';
 const sources = await Promise.all(['core', 'scheduler', 'updates', 'cache', 'graphics', 'engine', 'player', 'words', 'frames', 'main'].map(async name =>
   (await readFile(new URL(`../src/${name}.js`, import.meta.url), 'utf8')).replace(/^import .*;\n/gm, '').replace(/^export /gm, '')));
 
-function setup(saved = {}) {
+function setup(saved = {}, request = () => { throw new Error('No requests expected'); }) {
   const dom = new JSDOM('<body></body>', { url: 'https://app.abceed.com', pretendToBeVisual: true, runScripts: 'outside-only' });
   const win = dom.window, memory = new Map(Object.entries(saved));
   let root;
@@ -15,7 +15,7 @@ function setup(saved = {}) {
   win.GM_setValue = (key, value) => memory.set(key, value);
   win.GM_deleteValue = key => memory.delete(key);
   win.GM_registerMenuCommand = () => {};
-  win.GM_xmlhttpRequest = () => { throw new Error('No requests expected'); };
+  win.GM_xmlhttpRequest = request;
   win.eval(`(() => {${sources.join('\n')} })()`);
   return { dom, root, memory };
 }
@@ -54,4 +54,26 @@ test('first-time setup opens automatically, validation stays visible, valid save
     assert.equal(root.querySelector('[role=switch]').getAttribute('aria-checked'), 'true');
     assert.equal(memory.has('apiKey'), false);
   } finally { dom.window.close(); }
+});
+
+test('a failed textbook request exposes the retry button and retry re-enables translation', async () => {
+  const { dom, root } = setup({ config: { endpoint: 'https://test.example/chat/completions', model: 'test', enabled: true }, apiKey: 'test-key' }, options => {
+    queueMicrotask(() => options.onload({ status: 429, responseText: '' }));
+    return { abort() {} };
+  });
+  const win = dom.window;
+  try {
+    const frame = win.document.createElement('iframe'); win.document.body.append(frame);
+    frame.contentWindow.postMessage = () => {};
+    win.dispatchEvent(new win.MessageEvent('message', { origin: 'https://private.abceed.com', source: frame.contentWindow,
+      data: { channel: 'abceed-ai-lookup-v1', id: 'failed', type: 'request', mode: 'auto', text: ['解説'] } }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const retry = [...root.querySelectorAll('button')].find(button => button.textContent === '重试未翻译内容');
+    assert.equal(retry.hidden, false);
+    assert.equal(root.querySelector('[role=switch]').getAttribute('aria-checked'), 'false');
+    assert.match(root.querySelector('.status-detail').textContent, /教材翻译失败.*HTTP 429/);
+    retry.click();
+    assert.equal(retry.hidden, true);
+    assert.equal(root.querySelector('[role=switch]').getAttribute('aria-checked'), 'true');
+  } finally { win.close(); }
 });

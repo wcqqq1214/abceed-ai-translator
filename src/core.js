@@ -25,7 +25,7 @@ export function protectEnglish(text) {
   const values = [];
   let prefix = 'ABCEED_KEEP_';
   while (text.includes(prefix)) prefix += 'X';
-  const masked = text.replace(/[\p{Script=Latin}\p{N}][\p{Script=Latin}\p{M}\p{N} \t'’‘"“”.,!?;:()\[\]{}\/%+_=&@#\-–—]*/gu, value => {
+  const masked = text.replace(/[\p{Script=Latin}\p{N}][\p{Script=Latin}\p{M}\p{N}\s'’‘"“”.,!?;:()\[\]{}\/%+_=&@#\-–—]*/gu, value => {
     const token = `⟦${prefix}${values.length}⟧`;
     values.push({ token, value });
     return token;
