@@ -1,6 +1,6 @@
 import { adaptPlayerLabels } from './graphics.js';
 import { hasJapanese, MAX_TEXT, MAX_BATCH_CHARS, MAX_BATCH_ITEMS, SESSION_BUDGET } from './core.js';
-import { TranslationCache, translationScope } from './cache.js';
+import { TranslationCache, translationScope, normalizePageTranslation } from './cache.js';
 
 const EXCLUDE = 'script,style,noscript,textarea,input,code,pre,math,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-abceed-ai-ui]';
 
@@ -139,7 +139,7 @@ export class TranslationEngine {
     if (!(node.nodeType === 2 ? node.ownerElement?.isConnected : node.isConnected) || node.nodeValue !== source || !this.isVisible(node, this.win)) return;
     const leading = source.match(/^\s*/)[0];
     const trailing = source.match(/\s*$/)[0];
-    const value = leading + translated + trailing;
+    const value = leading + normalizePageTranslation(source, translated) + trailing;
     const element = node.nodeType === 2 ? node.ownerElement : node.parentElement;
     const option = element?.closest('option');
     // Without an explicit value, browsers derive it from the option text.

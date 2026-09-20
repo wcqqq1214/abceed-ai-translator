@@ -202,3 +202,15 @@ test('failed entries are skipped without repeated requests and explicit retry re
     assert.equal(calls, 2);
   } finally { dom.window.close(); }
 });
+
+test('fresh AI results and cached standalone count units both render as 题', async () => {
+  const { dom, engine, doc } = setup('<p id="total">763<span>問</span></p><p id="row">40問</p>', async texts => texts.map(t => t.replace('問', '问')));
+  await engine.tick();
+  assert.equal(doc.querySelector('#total').textContent, '763题');
+  assert.equal(doc.querySelector('#row').textContent, '40题');
+  doc.body.innerHTML = '<p>215問</p>';
+  engine.cache.items.set('215問', { text: '215问' });
+  engine.applyCached();
+  assert.equal(doc.body.textContent, '215题');
+  dom.window.close();
+});

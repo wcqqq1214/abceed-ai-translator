@@ -118,3 +118,14 @@ test('a failed clear stays cleared in memory and retries persistence without res
   fail = false; cache.flush();
   assert.deepEqual(backing.read().entries, [['解説', '解析']]);
 });
+
+test('old and new question-count translations use 题 without changing unrelated prose', () => {
+  const cache = new TranslationCache({ read: () => ({ version: 2, scope: 'test', entries: [['215問', '215问'], ['問', '问'], ['質問', '提问']] }) });
+  cache.load('test');
+  assert.equal(cache.get('215問'), '215题');
+  assert.equal(cache.get('問'), '题');
+  assert.equal(cache.get('質問'), '提问');
+  cache.set('388問', '388题'); assert.equal(cache.get('388問'), '388题');
+  cache.set('1,234問', '1,234问'); assert.equal(cache.get('1,234問'), '1,234题');
+  cache.set('English 問題', 'English 问题'); assert.equal(cache.get('English 問題'), 'English 问题');
+});

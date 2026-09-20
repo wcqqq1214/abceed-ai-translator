@@ -1,3 +1,11 @@
+// Normalize only standalone question-count units, never ordinary prose or English.
+export function normalizePageTranslation(source, text) {
+  if (/^[\d０-９,，.\s]*問\s*$/u.test(source) && /^[\d０-９,，.\s]*[问問]\s*$/u.test(text)) {
+    return text.replace(/[问問](?=\s*$)/u, '题');
+  }
+  return text;
+}
+
 // Revisions describe translation behavior, not extension releases. Cosmetic updates keep caches.
 export const PAGE_TRANSLATION_REVISION = 2; // Preserve whitespace inside English runs.
 export const WORD_TRANSLATION_REVISION = 2;
@@ -79,13 +87,13 @@ export class TranslationCache {
     // Retain frequently used menu labels when the bounded cache fills up.
     this.items.delete(source);
     this.items.set(source, entry);
-    return entry.text;
+    return normalizePageTranslation(source, entry.text);
   }
 
   set(source, text) {
     // Check before adding a new result so post-clear translations remain usable.
     try { this.syncReset(this.read()); } catch { /* Keep working in memory. */ }
-    const entry = { text };
+    const entry = { text: normalizePageTranslation(source, text) };
     this.items.delete(source);
     this.items.set(source, entry);
     this.pending.set(source, entry);
