@@ -92,3 +92,28 @@ test('embedded keyboard forwards keys only after trusted parent confirms availab
   assert.deepEqual(sent.at(-1), [{ channel: 'abceed-player-keys-v1', type: 'action', action: 'forward' }, 'https://app.abceed.com']);
   keys.destroy(); dom.window.close();
 });
+
+test('seeking releases mouse focus on play, allowing Space to toggle afterward', () => {
+  const f = fixture();
+  const play = f.buttons[2];
+  play.dispatchEvent(new f.dom.window.Event('pointerdown', { bubbles: true }));
+  play.focus();
+  assert.equal(f.doc.activeElement, play);
+  f.press('ArrowRight', play);
+  assert.equal(f.doc.activeElement, f.doc.body);
+  f.press(' ');
+  assert.deepEqual(f.counts, [0, 0, 1, 1, 0]);
+  f.finish();
+});
+
+test('seeking retains keyboard focus and Tab clears earlier mouse focus tracking', () => {
+  const f = fixture();
+  const play = f.buttons[2];
+  play.dispatchEvent(new f.dom.window.Event('pointerdown', { bubbles: true }));
+  f.press('Tab');
+  play.focus();
+  f.press('ArrowLeft', play);
+  assert.equal(f.doc.activeElement, play);
+  assert.deepEqual(f.counts, [0, 1, 0, 0, 0]);
+  f.finish();
+});

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.8.0
+// @version      1.8.1
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -687,7 +687,11 @@ function playerKeyAction(event) {
 function attachPlayerKeys(doc, win) {
   const embedded = win.top !== win;
   if (embedded && win.location.origin !== PLAYER_CONTENT) return { destroy() {} };
-  let available = {}, timer;
+  let available = {}, timer, pointerControl;
+  const onPointer = event => {
+    const target = event.target?.closest?.('.sound-controller-main-component > a.sound-controller_item');
+    pointerControl = target && Object.values(playerControls(doc)).includes(target) ? target : undefined;
+  };
   const execute = action => {
     const button = playerControls(doc)[action];
     if (!button) return false;
@@ -695,8 +699,15 @@ function attachPlayerKeys(doc, win) {
     return true;
   };
   const onKey = event => {
+    if (event.key === 'Tab') pointerControl = undefined;
     const action = playerKeyAction(event);
     if (!action || !(embedded ? available[action] : playerControls(doc)[action])) return;
+    // Mouse focus should not acquire a keyboard focus ring when seeking.
+    // Tab navigation deliberately retains focus and its accessible indicator.
+    if (pointerControl && doc.activeElement === pointerControl && Object.values(playerControls(doc)).includes(pointerControl)) {
+      pointerControl.blur();
+      pointerControl = undefined;
+    }
     // Holding Space must not rapidly toggle playback. Arrow repeats remain useful.
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -722,10 +733,12 @@ function attachPlayerKeys(doc, win) {
       event.source.postMessage({ channel: PLAYER_CHANNEL, type: 'state', available: Object.fromEntries(Object.keys(controls).map(action => [action, true])) }, PLAYER_CONTENT);
     } else if (data.type === 'action' && doc.activeElement === frame && ['back', 'toggle', 'forward'].includes(data.action)) execute(data.action);
   };
+  doc.addEventListener('pointerdown', onPointer, true);
   doc.addEventListener('keydown', onKey, true);
   win.addEventListener('message', onMessage);
   if (embedded) { query(); timer = win.setInterval(query, 500); win.addEventListener('focus', query); }
   return { destroy() {
+    doc.removeEventListener('pointerdown', onPointer, true);
     doc.removeEventListener('keydown', onKey, true);
     win.removeEventListener('message', onMessage);
     win.removeEventListener('focus', query);
@@ -1365,7 +1378,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.8.0', updateGroup, 'version');
+  el('span', 'v1.8.1', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1373,7 +1386,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.8.0');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.8.1');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;
