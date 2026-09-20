@@ -1,11 +1,12 @@
+import { adaptPlayerLabels } from './graphics.js';
 import { hasJapanese, MAX_TEXT, MAX_BATCH_CHARS, MAX_BATCH_ITEMS, SESSION_BUDGET } from './core.js';
 import { TranslationCache, translationScope } from './cache.js';
 
-const EXCLUDE = 'script,style,noscript,textarea,input,code,pre,svg,math,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-abceed-ai-ui]';
+const EXCLUDE = 'script,style,noscript,textarea,input,code,pre,math,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-abceed-ai-ui]';
 
 export function visibleTextNode(node, win) {
   const element = node.nodeType === 2 ? node.ownerElement : node.parentElement;
-  if (!element || element.closest(EXCLUDE)) return false;
+  if (!element || (element.closest('svg') && !element.closest('text[data-abceed-ai-label]')) || element.closest(EXCLUDE)) return false;
   for (let parent = element; parent; parent = parent.parentElement) {
     if (parent.hidden || parent.getAttribute('aria-hidden') === 'true') return false;
     const style = win.getComputedStyle(parent);
@@ -25,6 +26,7 @@ export function visibleTextNode(node, win) {
 export class TranslationEngine {
   constructor({ doc, win, translate, onStatus = () => {}, isVisible = visibleTextNode, budget = SESSION_BUDGET, cache = new TranslationCache() }) {
     Object.assign(this, { doc, win, translate, onStatus, isVisible, budget });
+    this.extraNodes = new Set();
     this.failed = new Set();
     this.written = new WeakMap();
     this.cache = cache;
@@ -99,6 +101,8 @@ export class TranslationEngine {
   }
 
   *translationNodes() {
+    adaptPlayerLabels(this.doc);
+    yield* this.extraNodes;
     const walker = this.doc.createTreeWalker(this.doc.body, this.win.NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) yield walker.currentNode;
     // Selected tabs render their aria-label through CSS; native menus may use label attributes.

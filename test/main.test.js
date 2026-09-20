@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
-const sources = await Promise.all(['core', 'scheduler', 'updates', 'cache', 'engine', 'player', 'words', 'frames', 'main'].map(async name =>
+const sources = await Promise.all(['core', 'scheduler', 'updates', 'cache', 'graphics', 'engine', 'player', 'words', 'frames', 'main'].map(async name =>
   (await readFile(new URL(`../src/${name}.js`, import.meta.url), 'utf8')).replace(/^import .*;\n/gm, '').replace(/^export /gm, '')));
 
 function setup(saved = {}) {

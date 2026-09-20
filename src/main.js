@@ -1,3 +1,4 @@
+import { attachCanvasTranslation } from './graphics.js';
 import { attachPlayerKeys } from './player.js';
 import { RequestScheduler } from './scheduler.js';
 import { checkForUpdate } from './updates.js';
@@ -161,6 +162,7 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
   const cache = new TranslationCache({ read: () => GM_getValue('translationCache', undefined), write: snapshot => GM_setValue('translationCache', snapshot) });
   const engine = new TranslationEngine({ doc: document, win: window, translate: scheduler.wrap(createPageTranslator(GM_xmlhttpRequest)), onStatus: setStatus, cache });
   engine.attach();
+  attachCanvasTranslation(document, window, typeof unsafeWindow === 'undefined' ? window : unsafeWindow, engine);
   const saved = GM_getValue('config', {});
   endpoint.value = saved.endpoint || '';
   model.value = saved.model || '';
