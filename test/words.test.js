@@ -361,3 +361,43 @@ test('speech errors preserve meaning and allow retry; unsupported browsers hide 
   assert.equal(words.speakButton.hidden, true);
   words.destroy(); dom.window.close();
 });
+
+test('multi-paragraph selection survives unrelated explanation translation and stopped mouseup bubbling', async () => {
+  const { dom, doc, words } = setup(async () => '');
+  const p = doc.querySelector('p');
+  p.innerHTML = '<span>Trent was surprised -------.</span><br><b>(A) convinced (24%)</b><aside>日本語</aside>';
+  dom.window.Range.prototype.getBoundingClientRect = () => ({ left: 100, top: 100, bottom: 200 });
+  const range = doc.createRange(); range.setStart(p.firstChild.firstChild, 0); range.setEnd(p.querySelector('b').firstChild, 19);
+  doc.getSelection().addRange(range);
+  words.translateSelection = async () => '译文';
+  p.addEventListener('mouseup', event => event.stopPropagation());
+  p.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true, button: 0 }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(words.popup.hidden, false);
+  p.querySelector('aside').textContent = '中文';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(words.popup.hidden, false);
+  p.querySelector('b').textContent = 'next question';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(words.popup.hidden, true);
+  words.destroy(); dom.window.close();
+});
+
+test('blank click dismisses once even when selection remains; a new drag can select the same text again', async () => {
+  const { dom, doc, words } = setup(async () => '');
+  const p = doc.querySelector('p');
+  dom.window.Range.prototype.getBoundingClientRect = () => ({ left: 100, top: 100, bottom: 120 });
+  const range = doc.createRange(); range.selectNodeContents(p);
+  doc.getSelection().addRange(range);
+  words.translateSelection = async () => '译文';
+  await words.lookup(p.textContent, 100, 100, 'selection');
+  doc.body.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, clientX: 500, clientY: 500 }));
+  doc.body.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 500, clientY: 500 }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(words.popup.hidden, true);
+  p.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 100 }));
+  p.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 220, clientY: 100 }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(words.popup.hidden, false);
+  words.destroy(); dom.window.close();
+});

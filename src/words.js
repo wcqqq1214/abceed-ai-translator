@@ -178,22 +178,42 @@ export class WordLookup {
     this.onSelection = event => {
       if (event.composedPath().includes(this.popup)) return;
       if (!this.translateSelection || event.button !== 0 || event.detail >= 2) return;
+      const gesture = this.selectionGesture;
+      this.selectionGesture = undefined;
+      const selection = doc.getSelection();
+      const range = selection?.rangeCount === 1 ? selection.getRangeAt(0) : null;
+      // A blank click can leave the old selection intact. It only dismisses.
+      if (gesture && range && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 4 &&
+          range.startContainer === gesture.start && range.startOffset === gesture.startOffset &&
+          range.endContainer === gesture.end && range.endOffset === gesture.endOffset &&
+          selection.toString() === gesture.text) return;
       const text = selectedEnglishText(doc, event.target);
       if (text) void this.lookup(text, event.clientX, event.clientY, ENGLISH_WORD.test(text) && text.length <= 60 ? 'word' : 'selection', doc.getSelection().getRangeAt(0).getBoundingClientRect());
     };
-    this.onOutside = event => { if (!event.composedPath().includes(root.host || this.popup)) this.hide(); };
+    this.onOutside = event => {
+      this.selectionGesture = undefined;
+      if (event.composedPath().includes(root.host || this.popup)) return;
+      const selection = doc.getSelection();
+      const range = selection?.rangeCount === 1 ? selection.getRangeAt(0) : null;
+      this.selectionGesture = {
+        x: event.clientX, y: event.clientY, text: selection?.toString(),
+        start: range?.startContainer, startOffset: range?.startOffset,
+        end: range?.endContainer, endOffset: range?.endOffset
+      };
+      this.hide();
+    };
     this.onKey = event => { if (event.key === 'Escape') this.hide(); };
     this.onMove = event => { if (!event.composedPath().includes(root.host || this.popup)) this.hide(); };
-    doc.addEventListener('dblclick', this.onDoubleClick);
-    doc.addEventListener('mouseup', this.onSelection);
-    doc.addEventListener('pointerdown', this.onOutside);
+    doc.addEventListener('dblclick', this.onDoubleClick, true);
+    doc.addEventListener('mouseup', this.onSelection, true);
+    doc.addEventListener('pointerdown', this.onOutside, true);
     doc.addEventListener('keydown', this.onKey);
     win.addEventListener('scroll', this.onMove, true);
     win.addEventListener('resize', this.onMove);
     this.checkPage = () => {
       if (this.popup.hidden) return;
-      if (win.location.href !== this.lookupURL || (this.sourceNode &&
-        (!this.sourceNode.isConnected || this.sourceNode.textContent !== this.sourceText))) this.hide();
+      if (win.location.href !== this.lookupURL || (this.sourceRange &&
+        (!this.sourceStart.isConnected || !this.sourceEnd.isConnected || this.sourceRange.toString() !== this.sourceText))) this.hide();
     };
     this.onNavigation = () => this.hide();
     win.addEventListener('popstate', this.onNavigation);
@@ -264,7 +284,8 @@ export class WordLookup {
     this.generation++;
     this.controller?.abort();
     this.popup.hidden = true;
-    this.sourceNode = undefined;
+    this.sourceRange = undefined;
+    this.sourceStart = this.sourceEnd = undefined;
   }
 
   position(x, y, anchor) {
@@ -307,9 +328,11 @@ export class WordLookup {
     const context = mode === 'word' ? selectedWordContext(this.doc) : '';
     this.lookupURL = url;
     const selection = this.doc.getSelection();
-    this.sourceNode = selection?.rangeCount && selection.toString().trim() === word
-      ? selection.getRangeAt(0).commonAncestorContainer : undefined;
-    this.sourceText = this.sourceNode?.textContent;
+    this.sourceRange = selection?.rangeCount && selection.toString().trim() === word
+      ? selection.getRangeAt(0).cloneRange() : undefined;
+    this.sourceStart = this.sourceRange?.startContainer;
+    this.sourceEnd = this.sourceRange?.endContainer;
+    this.sourceText = this.sourceRange?.toString();
     this.speechText = word;
     this.speakButton.hidden = !this.win.speechSynthesis || !this.win.SpeechSynthesisUtterance;
     this.speechError.hidden = true;
@@ -347,9 +370,9 @@ export class WordLookup {
 
   destroy() {
     this.hide();
-    this.doc.removeEventListener('dblclick', this.onDoubleClick);
-    this.doc.removeEventListener('mouseup', this.onSelection);
-    this.doc.removeEventListener('pointerdown', this.onOutside);
+    this.doc.removeEventListener('dblclick', this.onDoubleClick, true);
+    this.doc.removeEventListener('mouseup', this.onSelection, true);
+    this.doc.removeEventListener('pointerdown', this.onOutside, true);
     this.doc.removeEventListener('keydown', this.onKey);
     this.win.removeEventListener('scroll', this.onMove, true);
     this.win.removeEventListener('resize', this.onMove);
