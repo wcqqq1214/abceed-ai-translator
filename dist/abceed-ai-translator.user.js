@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.11.2
+// @version      1.11.3
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -68,8 +68,14 @@ function restoreEnglish(translated, protectedText) {
     if (remaining.split(token).length !== 2) throw new EnglishProtectionError('AI 未完整保留英语内容，已停止替换。请重试或更换模型。');
     remaining = remaining.replace(token, '');
   }
-  if (/[\p{Script=Latin}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(remaining)) {
-    throw new EnglishProtectionError('AI 返回了未翻译的日文或额外英语，已停止替换。请重试或更换模型。');
+  const kana = remaining.match(/[\p{Script=Hiragana}\p{Script=Katakana}ー]+/u)?.[0];
+  const latin = remaining.match(/[\p{Script=Latin}][\p{Script=Latin}\p{M}'’\-]*/u)?.[0];
+  if (kana || latin) {
+    const excerpt = text => Array.from(text).slice(0, 24).join('') + (Array.from(text).length > 24 ? '…' : '');
+    const reasons = [];
+    if (kana) reasons.push(`残留日文假名「${excerpt(kana)}」`);
+    if (latin) reasons.push(`额外英语（受保护原文之外）「${excerpt(latin)}」`);
+    throw new EnglishProtectionError(`AI 译文中${reasons.join('；')}，已停止替换。请重试或更换模型。`);
   }
   let result = translated;
   for (const { token, value } of protectedText.values) result = result.replace(token, () => value);
@@ -1001,7 +1007,7 @@ function createImageTranslator(gmRequest, cache, cryptoAPI = globalThis.crypto) 
     ensureActive(); load();
     if (!result) {
       const message = `文字已识别，但翻译未通过校验：${failureReason || '未取得有效译文。请重试。'}`;
-      // Only static validator diagnostics: no OCR text, image URL, key or provider response.
+      // Validator category and short offending runs only; never log full OCR, images, keys or raw responses.
       console.warn('[abceed AI][image translation]', message);
       throw new Error(message);
     }
@@ -1749,7 +1755,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.11.2', updateGroup, 'version');
+  el('span', 'v1.11.3', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1757,7 +1763,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.2');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.3');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;

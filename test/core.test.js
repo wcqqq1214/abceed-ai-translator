@@ -207,7 +207,7 @@ test('embedded paragraph recovery identifies validation failure and preserves re
       } else {
         const prompt = body.messages[0].content;
         assert.match(prompt, /上一次输出未通过校验/);
-        assert.match(prompt, failure === 'number' ? /未完整保留/ : /额外英语/);
+        assert.match(prompt, failure === 'number' ? /未完整保留/ : failure === 'kana' ? /残留日文假名「セルッティ」/ : /额外英语.*「Cerrutti」/);
         assert.match(prompt, /中文音译/);
         assert.match(prompt, /省略重复数字/);
         assert.equal(entries[0].text, protectEnglish(source).masked);
