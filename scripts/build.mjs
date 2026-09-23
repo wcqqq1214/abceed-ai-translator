@@ -27,7 +27,7 @@ const header = `// ==UserScript==
 // @updateURL    ${raw}
 // ==/UserScript==
 `;
-const sources = await Promise.all(['core', 'scheduler', 'updates', 'cache', 'graphics', 'engine', 'player', 'words', 'frames', 'main'].map(async name => {
+const sources = await Promise.all(['core', 'scheduler', 'updates', 'cache', 'graphics', 'engine', 'player', 'images', 'words', 'frames', 'main'].map(async name => {
   const source = await readFile(new URL(`src/${name}.js`, project), 'utf8');
   return source.replaceAll('__ABCEED_VERSION__', pkg.version).replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
 }));

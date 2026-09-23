@@ -116,7 +116,7 @@ export function parseResponse(raw, protectedTexts, partial = false, onInvalid = 
   });
 }
 
-export function createRequestTranslator(gmRequest, buildRequest = makeRequest, parse = parseResponse) {
+export function createRequestTranslator(gmRequest, buildRequest = makeRequest, parse = parseResponse, httpError = () => undefined) {
   return (texts, config, signal) => new Promise((resolve, reject) => {
     const { protectedTexts, body } = buildRequest(texts, config.model);
     // DeepSeek enables thinking by default; translation prioritizes response speed.
@@ -150,7 +150,7 @@ export function createRequestTranslator(gmRequest, buildRequest = makeRequest, p
           if (settled) return;
           if (response.status < 200 || response.status >= 300) {
             const advice = response.status === 401 || response.status === 403 ? '请检查 Key 和模型权限。' : response.status === 429 ? '请求限流或余额不足，请稍后再试。' : '请检查服务商状态和 API 地址。';
-            finish(new Error(`AI 接口返回 HTTP ${response.status}。${advice}`));
+            finish(httpError(response) || new Error(`AI 接口返回 HTTP ${response.status}。${advice}`));
             return;
           }
           try { finish(null, parse(response.responseText, protectedTexts)); }

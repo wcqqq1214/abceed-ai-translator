@@ -1,3 +1,4 @@
+import { createImageTranslator, readImageData } from './images.js';
 import { attachCanvasTranslation } from './graphics.js';
 import { attachPlayerKeys } from './player.js';
 import { RequestScheduler } from './scheduler.js';
@@ -11,7 +12,7 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
 (() => {
   if (document.querySelector('[data-abceed-ai-ui]')) return;
   attachPlayerKeys(document, window);
-  if (window.top !== window) { attachContentLookup(document, window); return; }
+  if (window.top !== window) { attachContentLookup(document, window, GM_xmlhttpRequest); return; }
   // The site's selection toolbar duplicates the AI lookup popup.
   const selectionStyle = document.createElement('style');
   selectionStyle.textContent = '.selected-word:has(> .selected-word__inner),.selected-word:has(> .selected-word__inner) ~ .arrow-icon{display:none!important}';
@@ -84,7 +85,7 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
   status.setAttribute('aria-live', 'polite');
   const retry = el('button', '重试未翻译内容', statusCard, 'cache-clear');
   retry.hidden = true;
-  el('p', '暂停自动翻译后，双击查词和划选翻译仍可使用。', content, 'manual-hint');
+  el('p', '双击图片可翻译日文。暂停自动翻译后，手动翻译仍可使用。', content, 'manual-hint');
   const connection = el('details', '', content, 'connection');
   el('summary', '接口设置', connection);
   const connectionBody = el('div', '', connection, 'connection-body');
@@ -169,16 +170,19 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
   key.value = GM_getValue('apiKey', '');
   remember.checked = Boolean(key.value);
 
+  const imageCache = new TranslationCache({ read: () => GM_getValue('imageCache', undefined), write: snapshot => GM_setValue('imageCache', snapshot) });
   const words = new WordLookup({ doc: document, win: window, root,
     getConfig: () => normalizeConfig({ endpoint: endpoint.value, model: model.value, key: key.value }),
     translate: scheduler.wrap(createWordTranslator(GM_xmlhttpRequest), 1),
+    readImage: (image, signal) => readImageData(image, GM_xmlhttpRequest, signal),
+    translateImage: scheduler.wrap(createImageTranslator(GM_xmlhttpRequest, imageCache), 1),
     translateSelection: scheduler.wrap(createSelectionTranslator(GM_xmlhttpRequest), 1),
     cache: new TranslationCache({ read: () => GM_getValue('wordCache', undefined), write: snapshot => GM_setValue('wordCache', snapshot) })
   });
 
   const autoFrameBridge = attachAutoFrameBridge({ win: window, doc: document, engine });
   const frameBridge = attachFrameBridge({ win: window, doc: document, getConfig: words.getConfig,
-    translate: words.translate, translateSelection: words.translateSelection, cache: words.cache });
+    translate: words.translate, translateSelection: words.translateSelection, translateImage: words.translateImage, cache: words.cache });
 
   start.onclick = () => {
     autoFrameBridge.cancelAll();
@@ -203,7 +207,7 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
     GM_setValue('config', { ...GM_getValue('config', {}), enabled: false });
   };
   retry.onclick = () => { autoFrameBridge.cancelAll(); engine.retryFailed(); retry.hidden = true; };
-  clear.onclick = () => { autoFrameBridge.cancelAll(); frameBridge.cancelAll(); words.clearCache(); engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
+  clear.onclick = () => { autoFrameBridge.cancelAll(); frameBridge.cancelAll(); words.clearCache(); imageCache.clear(); engine.clearCache(); setStatus('本地译文缓存已清除；当前中文保持不变。', engine.active ? 'running' : 'paused'); };
   GM_registerMenuCommand('abceed AI 翻译设置', () => show(true));
   if (saved.enabled && key.value) {
     try { engine.start(normalizeConfig({ ...saved, key: key.value })); }

@@ -11,6 +11,7 @@ export const PAGE_TRANSLATION_REVISION = 2; // Preserve whitespace inside Englis
 export const WORD_TRANSLATION_REVISION = 2;
 export function translationScope(config, kind = 'page') {
   const base = `${config.endpoint}\n${config.model}`;
+  if (kind === 'image') return `${base}\nimage-v1`;
   if (kind === 'word') return `${base}\nword-v${WORD_TRANSLATION_REVISION}`;
   return `${base}\npage-v${PAGE_TRANSLATION_REVISION}`;
 }

@@ -135,11 +135,11 @@ export function selectionPopupPosition(anchor, width, height, viewportWidth, vie
 }
 
 export class WordLookup {
-  constructor({ doc, win, root, getConfig, translate, translateSelection, cache }) {
-    Object.assign(this, { doc, win, root, getConfig, translate, translateSelection, cache });
+  constructor({ doc, win, root, getConfig, translate, translateSelection, translateImage, readImage, cache }) {
+    Object.assign(this, { doc, win, root, getConfig, translate, translateSelection, translateImage, readImage, cache });
     this.generation = 0;
     const style = doc.createElement('style');
-    style.textContent = `.word-popup{position:fixed;box-sizing:border-box;width:max-content;min-width:min(200px,calc(100vw - 24px));max-width:min(320px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:14px 16px;background:#fff;border:1px solid #e9eaed;border-radius:14px;box-shadow:0 4px 18px #17203312,0 1px 3px #17203308;color:#343a43;text-align:left;font:400 14px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;scrollbar-width:thin}.word-popup[data-mode=selection]{max-width:min(420px,calc(100vw - 24px))}.word-heading{display:flex;align-items:center;gap:10px}.word-title{flex:1;font-size:17px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}.word-popup[data-mode=selection] .word-title{font-size:11px;font-weight:400;letter-spacing:.03em;color:#9097a1}.word-close{display:grid;place-items:center;flex:none;width:22px;height:22px;border:0;border-radius:6px;background:none;color:#9aa1aa;font:400 18px/1 sans-serif;padding:0;cursor:pointer}.word-close:hover{background:#f4f5f7;color:#505966}.word-close:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-meaning{margin:8px 0 0;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.meaning-row{display:block}.meaning-row+.meaning-row{margin-top:5px}.meaning-pos{color:#929aa5;font-size:12px}.word-popup[data-loading=true] .word-meaning{font-size:12px;color:#929aa5}`;
+    style.textContent = `.word-popup{position:fixed;box-sizing:border-box;width:max-content;min-width:min(200px,calc(100vw - 24px));max-width:min(320px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:14px 16px;background:#fff;border:1px solid #e9eaed;border-radius:14px;box-shadow:0 4px 18px #17203312,0 1px 3px #17203308;color:#343a43;text-align:left;font:400 14px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;scrollbar-width:thin}.word-popup:is([data-mode=selection],[data-mode=image]){max-width:min(420px,calc(100vw - 24px))}.word-heading{display:flex;align-items:center;gap:10px}.word-title{flex:1;font-size:17px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}.word-popup:is([data-mode=selection],[data-mode=image]) .word-title{font-size:11px;font-weight:400;letter-spacing:.03em;color:#9097a1}.word-close{display:grid;place-items:center;flex:none;width:22px;height:22px;border:0;border-radius:6px;background:none;color:#9aa1aa;font:400 18px/1 sans-serif;padding:0;cursor:pointer}.word-close:hover{background:#f4f5f7;color:#505966}.word-close:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-meaning{margin:8px 0 0;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.meaning-row{display:block}.meaning-row+.meaning-row{margin-top:5px}.meaning-pos{color:#929aa5;font-size:12px}.word-popup[data-loading=true] .word-meaning{font-size:12px;color:#929aa5}`;
     style.textContent += `.word-speak{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:5px;border:0;border-radius:8px;background:none;color:#929aa5;cursor:pointer}.word-speak:hover{background:#f5f6f8;color:#505966}.word-speak[aria-pressed=true]{color:#ed627e;background:#fff1f4}.word-speak:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-speak svg{width:18px;height:18px}.word-speech-error{margin:6px 0 0;color:#929aa5;font-size:12px}[hidden]{display:none!important}`;
     root.append(style);
     this.popup = doc.createElement('section');
@@ -169,14 +169,27 @@ export class WordLookup {
     this.meaning.className = 'word-meaning';
     this.meaning.setAttribute('role', 'status');
     this.popup.append(heading, this.meaning, this.speechError);
+    this.imageRetry = doc.createElement('button');
+    this.imageRetry.type = 'button';
+    this.imageRetry.className = 'word-image-retry';
+    this.imageRetry.textContent = '重试';
+    this.imageRetry.hidden = true;
+    style.textContent += '.word-image-retry{margin-top:10px;padding:5px 12px;border:1px solid #e9eaed;border-radius:8px;background:#fff;color:#e74764;font:inherit;cursor:pointer}.word-image-retry:hover{background:#fff3f5}';
+    this.popup.append(this.imageRetry);
     root.append(this.popup);
     this.onDoubleClick = event => {
       if (event.composedPath().includes(this.popup)) return;
+      const image = event.target?.closest?.('img');
+      if (image && !image.closest(WORD_EXCLUDE) && this.translateImage && this.readImage) {
+        void this.lookup(image, event.clientX, event.clientY, 'image', image.getBoundingClientRect());
+        return;
+      }
       const word = selectedEnglishWord(doc, event.target);
       if (word) void this.lookup(word, event.clientX, event.clientY, 'word', doc.getSelection().getRangeAt(0).getBoundingClientRect());
     };
     this.onSelection = event => {
       if (event.composedPath().includes(this.popup)) return;
+      if (event.target?.closest?.('img')) return;
       if (!this.translateSelection || event.button !== 0 || event.detail >= 2) return;
       const gesture = this.selectionGesture;
       this.selectionGesture = undefined;
@@ -212,6 +225,7 @@ export class WordLookup {
     win.addEventListener('resize', this.onMove);
     this.checkPage = () => {
       if (this.popup.hidden) return;
+      if (this.sourceImage && (!this.sourceImage.isConnected || (this.sourceImage.currentSrc || this.sourceImage.src) !== this.imageURL)) { this.hide(); return; }
       if (win.location.href !== this.lookupURL || (this.sourceRange &&
         (!this.sourceStart.isConnected || !this.sourceEnd.isConnected || this.sourceRange.toString() !== this.sourceText))) this.hide();
     };
@@ -284,6 +298,9 @@ export class WordLookup {
     this.generation++;
     this.controller?.abort();
     this.popup.hidden = true;
+    this.sourceImage = undefined;
+    this.imageRetry.hidden = true;
+    this.imageRetry.onclick = null;
     this.sourceRange = undefined;
     this.sourceStart = this.sourceEnd = undefined;
   }
@@ -328,23 +345,38 @@ export class WordLookup {
     const context = mode === 'word' ? selectedWordContext(this.doc) : '';
     this.lookupURL = url;
     const selection = this.doc.getSelection();
-    this.sourceRange = selection?.rangeCount && selection.toString().trim() === word
+    this.sourceImage = mode === 'image' ? word : undefined;
+    this.imageURL = this.sourceImage && (word.currentSrc || word.src);
+    this.sourceRange = mode !== 'image' && selection?.rangeCount && selection.toString().trim() === word
       ? selection.getRangeAt(0).cloneRange() : undefined;
     this.sourceStart = this.sourceRange?.startContainer;
     this.sourceEnd = this.sourceRange?.endContainer;
     this.sourceText = this.sourceRange?.toString();
     this.speechText = word;
-    this.speakButton.hidden = !this.win.speechSynthesis || !this.win.SpeechSynthesisUtterance;
+    this.speakButton.hidden = mode === 'image' || !this.win.speechSynthesis || !this.win.SpeechSynthesisUtterance;
     this.speechError.hidden = true;
     this.popup.hidden = false;
     this.popup.dataset.mode = mode;
     this.popup.dataset.loading = 'true';
-    this.title.textContent = mode === 'selection' ? '划选翻译' : word;
+    this.title.textContent = mode === 'image' ? '图片翻译' : mode === 'selection' ? '划选翻译' : word;
     this.meaning.hidden = false;
-    this.meaning.textContent = mode === 'selection' ? 'AI 正在翻译…' : 'AI 正在查询…';
+    this.meaning.textContent = mode === 'image' ? 'AI 正在识别并翻译图片…' : mode === 'selection' ? 'AI 正在翻译…' : 'AI 正在查询…';
     this.position(x, y, anchor);
     try {
       const config = this.getConfig();
+      if (mode === 'image') {
+        this.controller = new AbortController();
+        const signal = this.controller.signal;
+        const data = await this.readImage(word, signal);
+        if (signal.aborted) return;
+        const meaning = await this.translateImage(data, config, signal);
+        if (generation !== this.generation) return;
+        this.checkPage();
+        if (generation !== this.generation) return;
+        this.renderMeaning(meaning, mode);
+        this.position(x, y, anchor);
+        return;
+      }
       const scope = translationScope(config, 'word');
       if (scope !== this.cache.scope) this.cache.load(scope);
       const cacheKey = mode === 'selection' ? `selection:${word}` : wordCacheKey(word, context);
@@ -362,6 +394,10 @@ export class WordLookup {
       if (url !== this.win.location.href) { this.hide(); return; }
       this.popup.dataset.loading = 'false';
       this.meaning.textContent = error.message;
+      if (mode === 'image') {
+        this.imageRetry.hidden = false;
+        this.imageRetry.onclick = () => void this.lookup(word, x, y, mode, word.getBoundingClientRect());
+      }
     }
     this.position(x, y, anchor);
   }

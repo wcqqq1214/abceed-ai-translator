@@ -1,3 +1,4 @@
+import { validImageData, MAX_IMAGE_DATA, readImageData } from './images.js';
 import { wordCacheKey, translationScope } from './cache.js';
 import { WordLookup } from './words.js';
 import { TranslationEngine } from './engine.js';
@@ -7,7 +8,7 @@ const FRAME_CHANNEL = 'abceed-ai-lookup-v1';
 const APP_ORIGIN = 'https://app.abceed.com';
 const CONTENT_ORIGIN = 'https://private.abceed.com';
 
-export function attachFrameBridge({ win, doc, getConfig, translate, translateSelection, cache }) {
+export function attachFrameBridge({ win, doc, getConfig, translate, translateSelection, translateImage, cache }) {
   const pending = new Map();
   const cancelAll = () => { for (const controller of pending.values()) controller.abort(); pending.clear(); };
   const onMessage = async event => {
@@ -16,9 +17,10 @@ export function attachFrameBridge({ win, doc, getConfig, translate, translateSel
       typeof data.id !== 'string' || data.id.length > 100 ||
       !Array.from(doc.querySelectorAll('iframe')).some(frame => frame.contentWindow === event.source)) return;
     if (data.type === 'cancel') { const current = pending.get(event.source); if (current?.requestId === data.id) { current.abort(); pending.delete(event.source); } return; }
-    if (data.type !== 'request' || !['word', 'selection'].includes(data.mode) ||
-      typeof data.text !== 'string' || !data.text.trim() || data.text.length > (data.mode === 'word' ? 60 : 3000) ||
+    if (data.type !== 'request' || !['word', 'selection', 'image'].includes(data.mode) ||
+      typeof data.text !== 'string' || !data.text.trim() || data.text.length > (data.mode === 'image' ? MAX_IMAGE_DATA : data.mode === 'word' ? 60 : 3000) ||
       (data.context !== undefined && (typeof data.context !== 'string' || data.context.length > 600))) return;
+    if (data.mode === 'image' && !validImageData(data.text)) return;
     pending.get(event.source)?.abort();
     const controller = new AbortController();
     controller.requestId = data.id;
@@ -29,6 +31,12 @@ export function attachFrameBridge({ win, doc, getConfig, translate, translateSel
     };
     try {
       const config = getConfig();
+      if (data.mode === 'image') {
+        if (!translateImage) throw new Error('图片翻译不可用，请更新脚本并刷新页面。');
+        const result = await translateImage(data.text, config, controller.signal);
+        reply({ result });
+        return;
+      }
       const scope = translationScope(config, 'word');
       if (cache.scope !== scope) cache.load(scope);
       const key = data.mode === 'word' ? wordCacheKey(data.text, data.context) : `selection:${data.text}`;
@@ -69,12 +77,12 @@ export function createFrameRequester(win) {
     if (signal?.aborted) { finish(new Error('翻译已暂停。')); return; }
     win.addEventListener('message', receive);
     signal?.addEventListener('abort', abort, { once: true });
-    timer = win.setTimeout(() => { abort(); }, 75000);
+    timer = win.setTimeout(() => { abort(); }, mode === 'image' ? 180000 : 75000);
     win.parent.postMessage({ channel: FRAME_CHANNEL, type: 'request', id, mode, text, context }, APP_ORIGIN);
   });
 }
 
-export function attachContentLookup(doc, win) {
+export function attachContentLookup(doc, win, gmRequest) {
   if (win.location.origin !== CONTENT_ORIGIN) return;
   const host = doc.createElement('div');
   host.setAttribute('data-abceed-ai-ui', '');
@@ -89,7 +97,9 @@ export function attachContentLookup(doc, win) {
   const cache = { scope: '', load(scope) { this.scope = scope; }, get() {}, set() {}, flush() {}, clear() {} };
   const words = new WordLookup({ doc, win, root, cache, getConfig: () => ({ endpoint: APP_ORIGIN, model: 'parent' }),
     translate: (text, config, signal, context) => request('word', text, config, signal, context),
-    translateSelection: (text, config, signal) => request('selection', text, config, signal)
+    translateSelection: (text, config, signal) => request('selection', text, config, signal),
+    readImage: (image, signal) => readImageData(image, gmRequest, signal),
+    translateImage: (data, config, signal) => request('image', data, config, signal)
   });
   const automatic = attachContentAutoTranslation(doc, win, request);
   return { words, automatic };

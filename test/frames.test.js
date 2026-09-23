@@ -222,3 +222,29 @@ test('a transient state polling failure recovers even when the parent revision i
     fail = false; await automatic.sync(); assert.equal(automatic.engine.active, true);
   } finally { automatic.destroy(); dom.window.close(); }
 });
+
+test('trusted embedded image lookup uses parent vision service, rejects URLs and cancellation suppresses replies', async () => {
+  const dom = new JSDOM('<iframe></iframe>', { url: 'https://app.abceed.com' });
+  const win = dom.window, doc = win.document, source = doc.querySelector('iframe').contentWindow;
+  const replies = []; source.postMessage = data => replies.push(data);
+  let calls = 0, resolve, signal;
+  const bridge = attachFrameBridge({ win, doc, getConfig: () => config, cache: new TranslationCache(),
+    translateImage: (data, settings, abortSignal) => {
+      calls++; assert.equal(settings.key, config.key); assert.match(data, /^data:image\/png;base64,/);
+      signal = abortSignal;
+      return calls === 1 ? Promise.resolve('图片译文') : new Promise(r => { resolve = r; });
+    } });
+  const send = (patch = {}, eventPatch = {}) => win.dispatchEvent(new win.MessageEvent('message', { origin, source, ...eventPatch,
+    data: { channel, id: 'image', type: 'request', mode: 'image', text: 'data:image/png;base64,YQ==', ...patch } }));
+  try {
+    send({ text: 'https://example.com/image.png' });
+    send({}, { origin: 'https://untrusted.example' });
+    await wait(); assert.equal(calls, 0);
+    send(); await wait();
+    assert.equal(replies[0].result, '图片译文');
+    assert.ok(!JSON.stringify(replies).includes(config.key));
+    send(); await wait(); send({ type: 'cancel' });
+    assert.equal(signal.aborted, true);
+    resolve('late'); await wait(); assert.equal(replies.length, 1);
+  } finally { bridge.destroy(); dom.window.close(); }
+});
