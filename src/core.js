@@ -42,8 +42,14 @@ export function restoreEnglish(translated, protectedText) {
     if (remaining.split(token).length !== 2) throw new EnglishProtectionError('AI 未完整保留英语内容，已停止替换。请重试或更换模型。');
     remaining = remaining.replace(token, '');
   }
-  if (/[\p{Script=Latin}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(remaining)) {
-    throw new EnglishProtectionError('AI 返回了未翻译的日文或额外英语，已停止替换。请重试或更换模型。');
+  const kana = remaining.match(/[\p{Script=Hiragana}\p{Script=Katakana}ー]+/u)?.[0];
+  const latin = remaining.match(/[\p{Script=Latin}][\p{Script=Latin}\p{M}'’\-]*/u)?.[0];
+  if (kana || latin) {
+    const excerpt = text => Array.from(text).slice(0, 24).join('') + (Array.from(text).length > 24 ? '…' : '');
+    const reasons = [];
+    if (kana) reasons.push(`残留日文假名「${excerpt(kana)}」`);
+    if (latin) reasons.push(`额外英语（受保护原文之外）「${excerpt(latin)}」`);
+    throw new EnglishProtectionError(`AI 译文中${reasons.join('；')}，已停止替换。请重试或更换模型。`);
   }
   let result = translated;
   for (const { token, value } of protectedText.values) result = result.replace(token, () => value);

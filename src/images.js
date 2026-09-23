@@ -115,7 +115,7 @@ export function createImageTranslator(gmRequest, cache, cryptoAPI = globalThis.c
     ensureActive(); load();
     if (!result) {
       const message = `文字已识别，但翻译未通过校验：${failureReason || '未取得有效译文。请重试。'}`;
-      // Only static validator diagnostics: no OCR text, image URL, key or provider response.
+      // Validator category and short offending runs only; never log full OCR, images, keys or raw responses.
       console.warn('[abceed AI][image translation]', message);
       throw new Error(message);
     }

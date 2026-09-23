@@ -219,3 +219,13 @@ test('embedded paragraph recovery identifies validation failure and preserves re
     assert.equal(bodies.length, 2);
   }
 });
+
+test('validation distinguishes leftover kana from extra Latin and shows bounded offending snippets', () => {
+  const part = protectEnglish('regard の説明');
+  const token = part.values[0].token;
+  assert.equal(restoreEnglish(`${token}的说明`, part), 'regard 的说明');
+  assert.throws(() => restoreEnglish(`${token}的カバー说明`, part), error => /残留日文假名「カバー」/.test(error.message) && !/额外英语/.test(error.message));
+  assert.throws(() => restoreEnglish(`${token}的signs说明`, part), error => /额外英语.*「signs」/.test(error.message) && !/残留日文假名/.test(error.message));
+  assert.throws(() => restoreEnglish(`${token}カバー signs`, part), /残留日文假名.*额外英语/);
+  assert.throws(() => restoreEnglish(`${token}${'a'.repeat(300)}`, part), error => error.message.includes('a'.repeat(24) + '…') && !error.message.includes('a'.repeat(25)));
+});
