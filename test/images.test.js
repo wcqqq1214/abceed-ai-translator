@@ -196,3 +196,32 @@ test('image refresh reruns OCR and translation but only replaces old cache after
   assert.equal(await translate(data, config), '解析');
   assert.equal(reads, 3); assert.equal(translations, 3);
 });
+
+test('abceed shield double-click resolves the displayed image without selecting its hidden duplicate or unrelated images', async () => {
+  const { dom, doc, image } = imageFixture();
+  const wrapper = doc.createElement('div'); wrapper.className = 'img-wrap';
+  const dummy = image.cloneNode(); dummy.className = 'dummy-img'; dummy.style.visibility = 'hidden';
+  const shield = doc.createElement('div'); shield.className = 'img-wrap__shield';
+  image.className = 'display-img'; image.replaceWith(wrapper);
+  shield.append(image); wrapper.append(dummy, shield);
+  const host = doc.createElement('div'); doc.body.append(host);
+  let calls = 0;
+  const words = new WordLookup({ doc, win: dom.window, root: host.attachShadow({ mode: 'closed' }),
+    getConfig: () => config, cache: new TranslationCache(),
+    readImage: async selected => { assert.equal(selected, image); return data; },
+    translateImage: async () => { calls++; return '解析译文'; }
+  });
+  try {
+    shield.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true })); await wait();
+    assert.equal(calls, 1);
+    assert.equal(words.popup.hidden, false);
+    assert.equal(words.meaning.textContent, '解析译文');
+    words.hide();
+    doc.body.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true })); await wait();
+    assert.equal(calls, 1);
+    assert.equal(words.popup.hidden, true);
+    wrapper.setAttribute('contenteditable', 'true');
+    shield.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true })); await wait();
+    assert.equal(calls, 1);
+  } finally { words.destroy(); dom.window.close(); }
+});

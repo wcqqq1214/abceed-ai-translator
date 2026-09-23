@@ -4,6 +4,13 @@ import { translationScope, wordCacheKey } from './cache.js';
 const ENGLISH_WORD = /^[A-Za-z]+(?:['’\-‐‑][A-Za-z]+)*$/;
 const WORD_EXCLUDE = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[data-abceed-ai-ui]';
 
+// abceed renders some textbook images inside a hit-testing shield. Resolve only
+// that known wrapper, never an arbitrary nearby image or its hidden size proxy.
+function lookupImage(target) {
+  if (!target?.closest || target.closest(WORD_EXCLUDE)) return null;
+  return target.closest('img') || target.closest('.img-wrap__shield')?.querySelector(':scope > img.display-img');
+}
+
 export function formatWordMeaning(text) {
   const labels = { '名词': 'n.', '动词': 'v.', '及物动词': 'vt.', '不及物动词': 'vi.', '形容词': 'adj.', '副词': 'adv.', '代词': 'pron.', '介词': 'prep.', '连词': 'conj.', '冠词': 'art.', '感叹词': 'interj.', '数词': 'num.', '助动词': 'aux.', '情态动词': 'modal v.' };
   return text.replace(/(^|[；;\n])([ \t]*)(不及物动词|及物动词|情态动词|助动词|名词|动词|形容词|副词|代词|介词|连词|冠词|感叹词|数词)[ \t]*[：:][ \t]*/g,
@@ -184,7 +191,7 @@ export class WordLookup {
     root.append(this.popup);
     this.onDoubleClick = event => {
       if (event.composedPath().includes(this.popup)) return;
-      const image = event.target?.closest?.('img');
+      const image = lookupImage(event.target);
       if (image && !image.closest(WORD_EXCLUDE) && this.translateImage && this.readImage) {
         void this.lookup(image, event.clientX, event.clientY, 'image', image.getBoundingClientRect());
         return;
@@ -194,7 +201,7 @@ export class WordLookup {
     };
     this.onSelection = event => {
       if (event.composedPath().includes(this.popup)) return;
-      if (event.target?.closest?.('img')) return;
+      if (lookupImage(event.target)) return;
       if (!this.translateSelection || event.button !== 0 || event.detail >= 2) return;
       const gesture = this.selectionGesture;
       this.selectionGesture = undefined;

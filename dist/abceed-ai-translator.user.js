@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.11.0
+// @version      1.11.1
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -1005,6 +1005,13 @@ function createImageTranslator(gmRequest, cache, cryptoAPI = globalThis.crypto) 
 const ENGLISH_WORD = /^[A-Za-z]+(?:['’\-‐‑][A-Za-z]+)*$/;
 const WORD_EXCLUDE = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[data-abceed-ai-ui]';
 
+// abceed renders some textbook images inside a hit-testing shield. Resolve only
+// that known wrapper, never an arbitrary nearby image or its hidden size proxy.
+function lookupImage(target) {
+  if (!target?.closest || target.closest(WORD_EXCLUDE)) return null;
+  return target.closest('img') || target.closest('.img-wrap__shield')?.querySelector(':scope > img.display-img');
+}
+
 function formatWordMeaning(text) {
   const labels = { '名词': 'n.', '动词': 'v.', '及物动词': 'vt.', '不及物动词': 'vi.', '形容词': 'adj.', '副词': 'adv.', '代词': 'pron.', '介词': 'prep.', '连词': 'conj.', '冠词': 'art.', '感叹词': 'interj.', '数词': 'num.', '助动词': 'aux.', '情态动词': 'modal v.' };
   return text.replace(/(^|[；;\n])([ \t]*)(不及物动词|及物动词|情态动词|助动词|名词|动词|形容词|副词|代词|介词|连词|冠词|感叹词|数词)[ \t]*[：:][ \t]*/g,
@@ -1185,7 +1192,7 @@ class WordLookup {
     root.append(this.popup);
     this.onDoubleClick = event => {
       if (event.composedPath().includes(this.popup)) return;
-      const image = event.target?.closest?.('img');
+      const image = lookupImage(event.target);
       if (image && !image.closest(WORD_EXCLUDE) && this.translateImage && this.readImage) {
         void this.lookup(image, event.clientX, event.clientY, 'image', image.getBoundingClientRect());
         return;
@@ -1195,7 +1202,7 @@ class WordLookup {
     };
     this.onSelection = event => {
       if (event.composedPath().includes(this.popup)) return;
-      if (event.target?.closest?.('img')) return;
+      if (lookupImage(event.target)) return;
       if (!this.translateSelection || event.button !== 0 || event.detail >= 2) return;
       const gesture = this.selectionGesture;
       this.selectionGesture = undefined;
@@ -1733,7 +1740,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.11.0', updateGroup, 'version');
+  el('span', 'v1.11.1', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1741,7 +1748,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.0');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.1');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;
