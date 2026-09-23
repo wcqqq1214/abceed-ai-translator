@@ -20,6 +20,7 @@ export function attachFrameBridge({ win, doc, getConfig, translate, translateSel
     if (data.type !== 'request' || !['word', 'selection', 'image'].includes(data.mode) ||
       typeof data.text !== 'string' || !data.text.trim() || data.text.length > (data.mode === 'image' ? MAX_IMAGE_DATA : data.mode === 'word' ? 60 : 3000) ||
       (data.context !== undefined && (typeof data.context !== 'string' || data.context.length > 600))) return;
+    if (data.force !== undefined && typeof data.force !== 'boolean') return;
     if (data.mode === 'image' && !validImageData(data.text)) return;
     pending.get(event.source)?.abort();
     const controller = new AbortController();
@@ -33,14 +34,14 @@ export function attachFrameBridge({ win, doc, getConfig, translate, translateSel
       const config = getConfig();
       if (data.mode === 'image') {
         if (!translateImage) throw new Error('图片翻译不可用，请更新脚本并刷新页面。');
-        const result = await translateImage(data.text, config, controller.signal);
+        const result = await translateImage(data.text, config, controller.signal, { force: data.force === true });
         reply({ result });
         return;
       }
       const scope = translationScope(config, 'word');
       if (cache.scope !== scope) cache.load(scope);
       const key = data.mode === 'word' ? wordCacheKey(data.text, data.context) : `selection:${data.text}`;
-      let result = cache.get(key);
+      let result = data.force ? undefined : cache.get(key);
       if (result === undefined) {
         result = await (data.mode === 'word' ? translate : translateSelection)(data.text, config, controller.signal, data.context);
         if (controller.signal.aborted) return;
@@ -55,7 +56,7 @@ export function attachFrameBridge({ win, doc, getConfig, translate, translateSel
 }
 
 export function createFrameRequester(win) {
-  return (mode, text, config, signal, context = '') => new Promise((resolve, reject) => {
+  return (mode, text, config, signal, context = '', { force = false } = {}) => new Promise((resolve, reject) => {
     const id = win.crypto.randomUUID();
     let timer;
     const finish = (error, result) => {
@@ -78,7 +79,7 @@ export function createFrameRequester(win) {
     win.addEventListener('message', receive);
     signal?.addEventListener('abort', abort, { once: true });
     timer = win.setTimeout(() => { abort(); }, mode === 'image' ? 180000 : 75000);
-    win.parent.postMessage({ channel: FRAME_CHANNEL, type: 'request', id, mode, text, context }, APP_ORIGIN);
+    win.parent.postMessage({ channel: FRAME_CHANNEL, type: 'request', id, mode, text, context, force }, APP_ORIGIN);
   });
 }
 
@@ -96,10 +97,10 @@ export function attachContentLookup(doc, win, gmRequest) {
   // Persistent cache and provider settings stay in the parent; frames never receive keys.
   const cache = { scope: '', load(scope) { this.scope = scope; }, get() {}, set() {}, flush() {}, clear() {} };
   const words = new WordLookup({ doc, win, root, cache, getConfig: () => ({ endpoint: APP_ORIGIN, model: 'parent' }),
-    translate: (text, config, signal, context) => request('word', text, config, signal, context),
-    translateSelection: (text, config, signal) => request('selection', text, config, signal),
+    translate: (text, config, signal, context, options) => request('word', text, config, signal, context, options),
+    translateSelection: (text, config, signal, context, options) => request('selection', text, config, signal, context, options),
     readImage: (image, signal) => readImageData(image, gmRequest, signal),
-    translateImage: (data, config, signal) => request('image', data, config, signal)
+    translateImage: (data, config, signal, options) => request('image', data, config, signal, '', options)
   });
   const automatic = attachContentAutoTranslation(doc, win, request);
   return { words, automatic };

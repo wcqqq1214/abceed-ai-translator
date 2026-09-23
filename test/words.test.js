@@ -401,3 +401,52 @@ test('blank click dismisses once even when selection remains; a new drag can sel
   assert.equal(words.popup.hidden, false);
   words.destroy(); dom.window.close();
 });
+
+test('refresh bypasses one contextual cache entry, preserves it on failure and remembers context after selection clears', async () => {
+  let calls = 0, fail = false;
+  const { dom, doc, words, cache } = setup(async (text, config, signal, context) => {
+    calls++; assert.equal(context, 'English stays here.');
+    if (fail) throw new Error('网络错误');
+    return `n. 译文${calls}`;
+  });
+  try {
+    const range = doc.createRange(); range.setStart(doc.querySelector('p').firstChild, 0); range.setEnd(doc.querySelector('p').firstChild, 7);
+    doc.getSelection().addRange(range);
+    await words.lookup('English', 100, 100);
+    cache.set('unrelated', '其他缓存');
+    doc.getSelection().removeAllRanges();
+    words.refreshButton.click();
+    words.refreshButton.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(calls, 2);
+    const key = wordCacheKey('English', 'English stays here.');
+    assert.equal(cache.get(key), 'n. 译文2');
+    assert.equal(cache.get('unrelated'), '其他缓存');
+    fail = true;
+    words.refreshButton.click(); await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(words.meaning.textContent, 'n. 译文2');
+    assert.match(words.refreshError.textContent, /保留原译文.*网络错误/);
+    assert.equal(cache.get(key), 'n. 译文2');
+    assert.equal(words.refreshButton.disabled, false);
+  } finally { words.destroy(); dom.window.close(); }
+});
+
+test('selection refresh replaces cached result and closing during refresh discards the response', async () => {
+  const { dom, words, cache } = setup(async () => '');
+  let finish;
+  words.translateSelection = async () => '旧译文';
+  try {
+    await words.lookup('a phrase', 100, 100, 'selection');
+    words.translateSelection = () => new Promise(resolve => { finish = resolve; });
+    words.refreshButton.click();
+    words.hide(); finish('关闭后的译文');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(words.popup.hidden, true);
+    assert.equal(cache.get('selection:a phrase'), '旧译文');
+    await words.lookup('a phrase', 100, 100, 'selection');
+    words.refreshButton.click(); finish('新译文');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(words.meaning.textContent, '新译文');
+    assert.equal(cache.get('selection:a phrase'), '新译文');
+  } finally { words.destroy(); dom.window.close(); }
+});

@@ -88,7 +88,7 @@ export function createImageTranslator(gmRequest, cache, cryptoAPI = globalThis.c
     return new Error(`图片识别请求失败（HTTP ${response.status}），请确认接口和模型支持图片输入，或重试。`);
   });
   const translate = createPageTranslator(gmRequest);
-  return async (data, config, signal) => {
+  return async (data, config, signal, { force = false } = {}) => {
     if (!validImageData(data)) throw new Error('图片数据无效或过大，请换一张图片重试。');
     const scope = translationScope(config, 'image');
     const digest = await cryptoAPI.subtle.digest('SHA-256', new TextEncoder().encode(data));
@@ -96,20 +96,24 @@ export function createImageTranslator(gmRequest, cache, cryptoAPI = globalThis.c
     const ensureActive = () => { if (signal?.aborted) throw new Error('翻译已暂停。'); };
     const load = () => { if (cache.scope !== scope) cache.load(scope); };
     ensureActive(); load();
-    const cached = cache.get(`translation:${id}`);
+    const cached = force ? undefined : cache.get(`translation:${id}`);
     if (cached !== undefined) return cached;
-    let text = cache.get(`ocr:${id}`);
+    let text = force ? undefined : cache.get(`ocr:${id}`);
     if (text === undefined) {
       text = await ocr(data, config, signal);
       ensureActive(); load();
-      if (text) { cache.set(`ocr:${id}`, text); cache.flush(); }
+      if (text && !force) { cache.set(`ocr:${id}`, text); cache.flush(); }
     }
     if (!text) throw new Error('图片中没有识别到清晰的文字，请换一张更清晰的图片重试。');
-    if (!hasJapanese(text)) return '图片中未识别到需要翻译的日文，英文内容保持原样。';
+    if (!hasJapanese(text)) {
+      const result = '图片中未识别到需要翻译的日文，英文内容保持原样。';
+      cache.set(`ocr:${id}`, text); cache.set(`translation:${id}`, result); cache.flush();
+      return result;
+    }
     const [result] = await translate([text], config, signal);
     ensureActive(); load();
     if (!result) throw new Error('文字已识别，但翻译未通过校验。请重试。');
-    cache.set(`translation:${id}`, result); cache.flush();
+    cache.set(`ocr:${id}`, text); cache.set(`translation:${id}`, result); cache.flush();
     return result;
   };
 }

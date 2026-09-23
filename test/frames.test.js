@@ -248,3 +248,23 @@ test('trusted embedded image lookup uses parent vision service, rejects URLs and
     resolve('late'); await wait(); assert.equal(replies.length, 1);
   } finally { bridge.destroy(); dom.window.close(); }
 });
+
+test('embedded refresh bypasses parent cache and keeps old result when refresh fails', async () => {
+  const dom = new JSDOM('<iframe></iframe>', { url: 'https://app.abceed.com' });
+  const win = dom.window, doc = win.document, source = doc.querySelector('iframe').contentWindow;
+  const replies = []; source.postMessage = data => replies.push(data);
+  let calls = 0, fail = false;
+  const bridge = attachFrameBridge({ win, doc, getConfig: () => config, cache: new TranslationCache(),
+    translateSelection: async () => { calls++; if (fail) throw new Error('网络错误'); return `译文${calls}`; } });
+  const send = force => win.dispatchEvent(new win.MessageEvent('message', { origin, source,
+    data: { channel, id: 'refresh', type: 'request', mode: 'selection', text: 'a phrase', force } }));
+  try {
+    send(false); await wait(); send(true); await wait();
+    assert.equal(replies.at(-1).result, '译文2');
+    fail = true; send(true); await wait();
+    assert.equal(replies.at(-1).error, '网络错误');
+    send(false); await wait();
+    assert.equal(replies.at(-1).result, '译文2');
+    assert.equal(calls, 3);
+  } finally { bridge.destroy(); dom.window.close(); }
+});

@@ -142,12 +142,12 @@ test('double-click image shares popup, retries failures and closes on image repl
     await wait();
     assert.equal(words.title.textContent, '图片翻译');
     assert.match(words.meaning.textContent, /不支持图片识别/);
-    assert.equal(words.imageRetry.hidden, false);
+    assert.equal(words.refreshButton.disabled, false);
     assert.equal(words.speakButton.hidden, true);
-    words.imageRetry.click(); await wait();
+    words.refreshButton.click(); await wait();
     assert.equal(words.meaning.textContent, '<b>图片译文</b>');
     assert.equal(words.meaning.children.length, 0);
-    assert.equal(words.imageRetry.hidden, true);
+    assert.equal(words.refreshButton.disabled, false);
     assert.equal(image.src, 'https://private.abceed.com/picture.png');
     image.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true })); await wait();
     image.src = 'https://private.abceed.com/next.png'; words.checkPage();
@@ -173,4 +173,26 @@ test('closing the popup while reading an image prevents sending it to the AI ser
     assert.equal(calls, 0);
     assert.equal(words.popup.hidden, true);
   } finally { words.destroy(); dom.window.close(); }
+});
+
+test('image refresh reruns OCR and translation but only replaces old cache after success', async () => {
+  let reads = 0, translations = 0, fail = false;
+  const cache = new TranslationCache();
+  const translate = createImageTranslator(mockRequest(options => {
+    const body = JSON.parse(options.data);
+    if (Array.isArray(body.messages[1].content)) {
+      reads++; return { status: 200, responseText: envelope({ status: 'ok', text: reads === 1 ? '説明' : '解説' }) };
+    }
+    translations++;
+    return fail ? { status: 429, responseText: '' } : { status: 200, responseText: envelope({ translations: [{ id: '0', text: translations === 1 ? '说明' : '解析' }] }) };
+  }), cache);
+  assert.equal(await translate(data, config), '说明');
+  fail = true;
+  await assert.rejects(translate(data, config, undefined, { force: true }), /限流/);
+  assert.equal(await translate(data, config), '说明');
+  assert.ok([...cache.items.values()].some(entry => entry.text === '説明'));
+  fail = false;
+  assert.equal(await translate(data, config, undefined, { force: true }), '解析');
+  assert.equal(await translate(data, config), '解析');
+  assert.equal(reads, 3); assert.equal(translations, 3);
 });
