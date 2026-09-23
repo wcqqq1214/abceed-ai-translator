@@ -219,7 +219,7 @@ export function createTranslator(gmRequest, recoveryReason = '') {
 
 // Keep valid results when a model mishandles one entry. Transport failures still stop the batch.
 export function createPageTranslator(gmRequest) {
-  return async (texts, config, signal) => {
+  return async (texts, config, signal, { onInvalid = () => {} } = {}) => {
     // Keep diagnostics local: parent and frame batches can run concurrently.
     const reasons = new Map();
     const request = createRequestTranslator(gmRequest, makeRequest, (raw, parts) =>
@@ -229,7 +229,7 @@ export function createPageTranslator(gmRequest) {
     catch (error) {
       if (!(error instanceof TranslationResponseError)) throw error;
       // Malformed whole responses are left for explicit retry, avoiding a burst of requests.
-      return texts.map(() => null);
+      return texts.map((_, index) => { onInvalid(index, error.message); return null; });
     }
     for (let index = 0; index < results.length; index++) {
       if (results[index] !== null) continue;
@@ -237,7 +237,10 @@ export function createPageTranslator(gmRequest) {
         const recover = createTranslator(gmRequest, reasons.get(index));
         results[index] = (await recover([texts[index]], config, signal))[0];
       }
-      catch (error) { if (!(error instanceof TranslationResponseError) || signal?.aborted) throw error; }
+      catch (error) {
+        if (!(error instanceof TranslationResponseError) || signal?.aborted) throw error;
+        onInvalid(index, error.message);
+      }
     }
     return results;
   };

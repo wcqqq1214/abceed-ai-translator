@@ -110,9 +110,15 @@ export function createImageTranslator(gmRequest, cache, cryptoAPI = globalThis.c
       cache.set(`ocr:${id}`, text); cache.set(`translation:${id}`, result); cache.flush();
       return result;
     }
-    const [result] = await translate([text], config, signal);
+    let failureReason;
+    const [result] = await translate([text], config, signal, { onInvalid: (_, reason) => { failureReason = reason; } });
     ensureActive(); load();
-    if (!result) throw new Error('文字已识别，但翻译未通过校验。请重试。');
+    if (!result) {
+      const message = `文字已识别，但翻译未通过校验：${failureReason || '未取得有效译文。请重试。'}`;
+      // Only static validator diagnostics: no OCR text, image URL, key or provider response.
+      console.warn('[abceed AI][image translation]', message);
+      throw new Error(message);
+    }
     cache.set(`ocr:${id}`, text); cache.set(`translation:${id}`, result); cache.flush();
     return result;
   };

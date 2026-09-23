@@ -225,3 +225,12 @@ test('abceed shield double-click resolves the displayed image without selecting 
     assert.equal(calls, 1);
   } finally { words.destroy(); dom.window.close(); }
 });
+
+test('image translation reports specific validation failures without exposing OCR or provider response', async () => {
+  const translate = createImageTranslator(mockRequest(options => {
+    const body = JSON.parse(options.data);
+    return { status: 200, responseText: Array.isArray(body.messages[1].content)
+      ? envelope({ status: 'ok', text: '秘密の解説' }) : 'private provider response' };
+  }), new TranslationCache());
+  await assert.rejects(translate(data, config), error => /未返回完整的翻译 JSON/.test(error.message) && !/秘密|private|test-secret/.test(error.message));
+});

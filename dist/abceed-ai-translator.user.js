@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.11.1
+// @version      1.11.2
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -245,7 +245,7 @@ function createTranslator(gmRequest, recoveryReason = '') {
 
 // Keep valid results when a model mishandles one entry. Transport failures still stop the batch.
 function createPageTranslator(gmRequest) {
-  return async (texts, config, signal) => {
+  return async (texts, config, signal, { onInvalid = () => {} } = {}) => {
     // Keep diagnostics local: parent and frame batches can run concurrently.
     const reasons = new Map();
     const request = createRequestTranslator(gmRequest, makeRequest, (raw, parts) =>
@@ -255,7 +255,7 @@ function createPageTranslator(gmRequest) {
     catch (error) {
       if (!(error instanceof TranslationResponseError)) throw error;
       // Malformed whole responses are left for explicit retry, avoiding a burst of requests.
-      return texts.map(() => null);
+      return texts.map((_, index) => { onInvalid(index, error.message); return null; });
     }
     for (let index = 0; index < results.length; index++) {
       if (results[index] !== null) continue;
@@ -263,7 +263,10 @@ function createPageTranslator(gmRequest) {
         const recover = createTranslator(gmRequest, reasons.get(index));
         results[index] = (await recover([texts[index]], config, signal))[0];
       }
-      catch (error) { if (!(error instanceof TranslationResponseError) || signal?.aborted) throw error; }
+      catch (error) {
+        if (!(error instanceof TranslationResponseError) || signal?.aborted) throw error;
+        onInvalid(index, error.message);
+      }
     }
     return results;
   };
@@ -993,9 +996,15 @@ function createImageTranslator(gmRequest, cache, cryptoAPI = globalThis.crypto) 
       cache.set(`ocr:${id}`, text); cache.set(`translation:${id}`, result); cache.flush();
       return result;
     }
-    const [result] = await translate([text], config, signal);
+    let failureReason;
+    const [result] = await translate([text], config, signal, { onInvalid: (_, reason) => { failureReason = reason; } });
     ensureActive(); load();
-    if (!result) throw new Error('文字已识别，但翻译未通过校验。请重试。');
+    if (!result) {
+      const message = `文字已识别，但翻译未通过校验：${failureReason || '未取得有效译文。请重试。'}`;
+      // Only static validator diagnostics: no OCR text, image URL, key or provider response.
+      console.warn('[abceed AI][image translation]', message);
+      throw new Error(message);
+    }
     cache.set(`ocr:${id}`, text); cache.set(`translation:${id}`, result); cache.flush();
     return result;
   };
@@ -1740,7 +1749,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.11.1', updateGroup, 'version');
+  el('span', 'v1.11.2', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1748,7 +1757,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.1');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.2');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;
