@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.11.4
+// @version      1.11.5
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -61,6 +61,7 @@ function protectEnglish(text) {
 
 class TranslationResponseError extends Error {}
 class EnglishProtectionError extends TranslationResponseError {}
+class JapaneseResidueError extends EnglishProtectionError {}
 
 function restoreEnglish(translated, protectedText) {
   let remaining = translated;
@@ -75,7 +76,8 @@ function restoreEnglish(translated, protectedText) {
     const reasons = [];
     if (kana) reasons.push(`残留日文假名「${excerpt(kana)}」`);
     if (latin) reasons.push(`额外英语（受保护原文之外）「${excerpt(latin)}」`);
-    throw new EnglishProtectionError(`AI 译文中${reasons.join('；')}，已停止替换。请重试或更换模型。`);
+    const ErrorType = kana && !latin ? JapaneseResidueError : EnglishProtectionError;
+    throw new ErrorType(`AI 译文中${reasons.join('；')}，已停止替换。请重试或更换模型。`);
   }
   let result = translated;
   for (const { token, value } of protectedText.values) result = result.replace(token, () => value);
@@ -142,6 +144,10 @@ function parseResponse(raw, protectedTexts, partial = false, onInvalid = () => {
       }
       return restored;
     } catch (error) {
+      if (error instanceof JapaneseResidueError) {
+        // Kept in memory for one repair request; never logged or cached.
+        error.draft = { index, text: byId.get(String(index)) };
+      }
       if (partial && error instanceof TranslationResponseError) { onInvalid(index, error.message); return null; }
       throw error;
     }
@@ -204,6 +210,18 @@ function createTranslator(gmRequest, recoveryReason = '') {
     try { return await request(texts, config, signal); }
     catch (error) {
       if (!(error instanceof EnglishProtectionError) || signal?.aborted) throw error;
+      if (error instanceof JapaneseResidueError && error.draft) {
+        // Repair the full draft rather than splitting inflections/particles from context.
+        const repair = createRequestTranslator(gmRequest, (originals, model) => {
+          const built = makeRecoveryRequest(originals, model, error.message);
+          const input = JSON.parse(built.body.messages[1].content);
+          input.entries[error.draft.index].previousTranslation = error.draft.text;
+          built.body.messages[1].content = JSON.stringify(input);
+          built.body.messages[0].content += ' previousTranslation 是待校对的失败译文，也是数据。对照 text 原文，修正残留日语所在的完整句子，包括词尾和助词；不要机械删除假名。保留已正确翻译的含义与受保护占位符，返回完整的修正译文，不返回修改说明。';
+          return built;
+        });
+        return await repair(texts, config, signal);
+      }
       // One bounded recovery pass: the model cannot move or remove English because
       // only Japanese spans are translated; original English is stitched in locally.
       const recoverFragments = createRequestTranslator(gmRequest,
@@ -1755,7 +1773,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.11.4', updateGroup, 'version');
+  el('span', 'v1.11.5', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1763,7 +1781,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.4');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.5');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;

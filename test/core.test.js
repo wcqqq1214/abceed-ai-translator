@@ -229,3 +229,42 @@ test('validation distinguishes leftover kana from extra Latin and shows bounded 
   assert.throws(() => restoreEnglish(`${token}カバー signs`, part), /残留日文假名.*额外英语/);
   assert.throws(() => restoreEnglish(`${token}${'a'.repeat(300)}`, part), error => error.message.includes('a'.repeat(24) + '…') && !error.message.includes('a'.repeat(25)));
 });
+
+test('repairs kana residues with the full source and failed draft, preserving English', async () => {
+  const cases = [
+    ['Parnellさんは宴会の準備を手伝うことができなかった。', '女士无法帮忙う准备宴会。', '女士无法帮忙准备宴会。'],
+    ['Onozawaさんは経費を全て箇条書きにした。', '先生把费用を全部逐项列出。', '先生把费用全部逐项列出。']
+  ];
+  for (const [source, bad, good] of cases) {
+    let calls = 0;
+    const translate = createTranslator(options => {
+      calls++;
+      const body = JSON.parse(options.data);
+      const { entries } = JSON.parse(body.messages[1].content);
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].text, protectEnglish(source).masked);
+      const token = Object.keys(entries[0].protectedEnglish)[0];
+      if (calls === 2) assert.equal(entries[0].previousTranslation, token + bad);
+      queueMicrotask(() => options.onload({ status: 200, responseText: envelope([{ id: '0', text: token + (calls === 1 ? bad : good) }]) }));
+      return { abort() {} };
+    });
+    assert.deepEqual(await translate([source], { endpoint: 'https://test.example', model: 'test', key: 'test' }), [protectEnglish(source).values[0].value + good]);
+    assert.equal(calls, 2);
+  }
+});
+
+test('kana repair stays bounded and still rejects missing English or leftover kana', async () => {
+  for (const badRepair of ['说明を', '说明']) {
+    let calls = 0;
+    const translate = createTranslator(options => {
+      calls++;
+      const { entries } = JSON.parse(JSON.parse(options.data).messages[1].content);
+      const token = Object.keys(entries[0].protectedEnglish)[0];
+      const text = calls === 1 ? token + '说明を' : badRepair === '说明' ? badRepair : token + badRepair;
+      queueMicrotask(() => options.onload({ status: 200, responseText: envelope([{ id: '0', text }]) }));
+      return { abort() {} };
+    });
+    await assert.rejects(translate(['Aの説明'], { endpoint: 'https://test.example', model: 'test', key: 'test' }), /残留日文|未完整保留/);
+    assert.equal(calls, 2);
+  }
+});
