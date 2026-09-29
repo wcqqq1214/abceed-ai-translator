@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.11.6
+// @version      1.11.7
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -604,7 +604,13 @@ function attachCanvasTranslation(doc, win, pageWindow, engine) {
 
 // Restrict the local Chinese face to CJK so Latin text keeps the site's font.
 const CHINESE_FACE = 'Abceed AI Chinese';
-const CHINESE_FONT_CSS = `@font-face{font-family:"${CHINESE_FACE}";src:local("PingFang SC"),local("Microsoft YaHei"),local("Noto Sans CJK SC"),local("Noto Sans SC"),local("Source Han Sans SC");unicode-range:U+3000-303F,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+FF00-FFEF,U+20000-323AF;}`;
+// local() resolves full/PostScript face names, not reliably family names.
+const CHINESE_FONT_CSS = [
+  ['100 300', ['PingFangSC-Light', 'PingFang SC Light', 'Microsoft YaHei Light', 'NotoSansCJKsc-Light']],
+  ['400', ['PingFangSC-Regular', 'PingFang SC Regular', 'Microsoft YaHei', 'NotoSansCJKsc-Regular', 'NotoSansSC-Regular', 'SourceHanSansSC-Regular']],
+  ['500', ['PingFangSC-Medium', 'PingFang SC Medium', 'Microsoft YaHei', 'NotoSansCJKsc-Medium']],
+  ['600 900', ['PingFangSC-Semibold', 'PingFang SC Semibold', 'MicrosoftYaHei-Bold', 'Microsoft YaHei Bold', 'NotoSansCJKsc-Bold', 'SourceHanSansSC-Bold']]
+].map(([weight, faces]) => `@font-face{font-family:"${CHINESE_FACE}";font-weight:${weight};src:${faces.map(face => `local("${face}")`).join(',')};unicode-range:U+3000-303F,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+FF00-FFEF,U+20000-323AF;}`).join('\n');
 const typographyDocuments = new WeakSet();
 
 function styleChineseTranslation(node, win) {
@@ -1799,7 +1805,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.11.6', updateGroup, 'version');
+  el('span', 'v1.11.7', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1807,7 +1813,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.6');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.7');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;

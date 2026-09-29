@@ -228,7 +228,8 @@ test('translated text uses a CJK-only Chinese face without wrapping nodes or cha
   assert.equal(doc.documentElement.lang, 'ja');
   const css = doc.head.querySelector('style').textContent;
   assert.match(css, /unicode-range:U\+3000/);
-  assert.match(css, /local\("PingFang SC"\)/);
+  assert.match(css, /local\("PingFangSC-Regular"\)/);
+  assert.match(css, /font-weight:600 900;src:local\("PingFangSC-Semibold"\)/);
   await engine.tick();
   assert.equal(doc.head.querySelectorAll('style').length, 1);
   dom.window.close();
