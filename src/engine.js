@@ -1,3 +1,4 @@
+import { styleChineseTranslation } from './typography.js';
 import { adaptPlayerLabels } from './graphics.js';
 import { hasJapanese, MAX_TEXT, MAX_BATCH_CHARS, MAX_BATCH_ITEMS, SESSION_BUDGET } from './core.js';
 import { TranslationCache, translationScope, normalizePageTranslation } from './cache.js';
@@ -146,6 +147,7 @@ export class TranslationEngine {
     if (option && !option.hasAttribute('value')) option.setAttribute('value', option.value);
     this.written.set(node, value);
     node.nodeValue = value;
+    styleChineseTranslation(node, this.win);
     this.count++;
   }
 

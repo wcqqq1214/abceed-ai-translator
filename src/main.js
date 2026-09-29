@@ -19,13 +19,14 @@ import { WordLookup, createWordTranslator, createSelectionTranslator } from './w
   document.documentElement.append(selectionStyle);
   const host = document.createElement('div');
   host.setAttribute('data-abceed-ai-ui', '');
+  host.setAttribute('lang', 'zh-CN');
   host.setAttribute('translate', 'no');
   host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;';
   // Keep API settings out of the page's DOM and avoid site CSS interference.
   const root = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
   style.textContent = `
-    :host{all:initial;color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;font-weight:400;line-height:1.5;color:#262932;-webkit-font-smoothing:antialiased}
+    :host{all:initial;color-scheme:light;font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;font-weight:400;line-height:1.5;color:#262932;-webkit-font-smoothing:antialiased}
     *{box-sizing:border-box}button,input{font:inherit}button{cursor:pointer;transition:background .16s,box-shadow .16s,transform .16s}button:focus-visible,summary:focus-visible{outline:3px solid #fda4af;outline-offset:3px}button:active{transform:translateY(1px)}
     [hidden]{display:none!important}svg{display:block;flex:none;width:18px;height:18px}h2,p{margin:0}
     .toggle{display:flex;align-items:center;gap:7px;margin-left:auto;padding:9px 12px;border:1px solid #e6e7eb;border-radius:15px;background:#fff;color:#333640;box-shadow:0 3px 8px #17203308,0 8px 28px #17203312;font-weight:400;font-size:13px;letter-spacing:.01em}

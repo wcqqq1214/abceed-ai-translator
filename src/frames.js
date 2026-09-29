@@ -87,6 +87,7 @@ export function attachContentLookup(doc, win, gmRequest) {
   if (win.location.origin !== CONTENT_ORIGIN) return;
   const host = doc.createElement('div');
   host.setAttribute('data-abceed-ai-ui', '');
+  host.setAttribute('lang', 'zh-CN');
   host.style.cssText = 'position:fixed;z-index:2147483647;';
   const root = host.attachShadow({ mode: 'closed' });
   const style = doc.createElement('style');

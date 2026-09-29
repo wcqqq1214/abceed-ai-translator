@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         abceed AI 日文自动翻译
 // @namespace    https://github.com/wcqqq1214/abceed-ai-translator
-// @version      1.11.5
+// @version      1.11.6
 // @description  用可配置的 AI 大模型将 abceed 可见日文自动替换为中文，保留英语原样。
 // @author       wcqqq1214
 // @license      MIT
@@ -602,6 +602,28 @@ function attachCanvasTranslation(doc, win, pageWindow, engine) {
   } };
 }
 
+// Restrict the local Chinese face to CJK so Latin text keeps the site's font.
+const CHINESE_FACE = 'Abceed AI Chinese';
+const CHINESE_FONT_CSS = `@font-face{font-family:"${CHINESE_FACE}";src:local("PingFang SC"),local("Microsoft YaHei"),local("Noto Sans CJK SC"),local("Noto Sans SC"),local("Source Han Sans SC");unicode-range:U+3000-303F,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+FF00-FFEF,U+20000-323AF;}`;
+const typographyDocuments = new WeakSet();
+
+function styleChineseTranslation(node, win) {
+  // Attribute labels and canvas adapters have no independent text styling surface.
+  if (node.nodeType !== 3 || !/\p{Script=Han}/u.test(node.nodeValue)) return;
+  const element = node.parentElement;
+  if (!element?.style) return;
+  const doc = element.ownerDocument;
+  if (!typographyDocuments.has(doc)) {
+    const style = doc.createElement('style');
+    style.textContent = CHINESE_FONT_CSS;
+    (doc.head || doc.documentElement).append(style);
+    typographyDocuments.add(doc);
+  }
+  const family = win.getComputedStyle(element).fontFamily;
+  if (!family.includes(CHINESE_FACE)) element.style.fontFamily = `"${CHINESE_FACE}", ${family || 'sans-serif'}`;
+  element.setAttribute('lang', 'zh-CN');
+}
+
 
 const EXCLUDE = 'script,style,noscript,textarea,input,code,pre,math,[contenteditable]:not([contenteditable="false"]),[translate="no"],.notranslate,[data-abceed-ai-ui]';
 
@@ -747,6 +769,7 @@ class TranslationEngine {
     if (option && !option.hasAttribute('value')) option.setAttribute('value', option.value);
     this.written.set(node, value);
     node.nodeValue = value;
+    styleChineseTranslation(node, this.win);
     this.count++;
   }
 
@@ -1180,11 +1203,12 @@ class WordLookup {
     Object.assign(this, { doc, win, root, getConfig, translate, translateSelection, translateImage, readImage, cache });
     this.generation = 0;
     const style = doc.createElement('style');
-    style.textContent = `.word-popup{position:fixed;box-sizing:border-box;width:max-content;min-width:min(200px,calc(100vw - 24px));max-width:min(320px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:14px 16px;background:#fff;border:1px solid #e9eaed;border-radius:14px;box-shadow:0 4px 18px #17203312,0 1px 3px #17203308;color:#343a43;text-align:left;font:400 14px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;scrollbar-width:thin}.word-popup:is([data-mode=selection],[data-mode=image]){max-width:min(420px,calc(100vw - 24px))}.word-heading{display:flex;align-items:center;gap:10px}.word-title{flex:1;font-size:17px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}.word-popup:is([data-mode=selection],[data-mode=image]) .word-title{font-size:11px;font-weight:400;letter-spacing:.03em;color:#9097a1}.word-close{display:grid;place-items:center;flex:none;width:22px;height:22px;border:0;border-radius:6px;background:none;color:#9aa1aa;font:400 18px/1 sans-serif;padding:0;cursor:pointer}.word-close:hover{background:#f4f5f7;color:#505966}.word-close:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-meaning{margin:8px 0 0;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.meaning-row{display:block}.meaning-row+.meaning-row{margin-top:5px}.meaning-pos{color:#929aa5;font-size:12px}.word-popup[data-loading=true] .word-meaning{font-size:12px;color:#929aa5}`;
+    style.textContent = `.word-popup{position:fixed;box-sizing:border-box;width:max-content;min-width:min(200px,calc(100vw - 24px));max-width:min(320px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:14px 16px;background:#fff;border:1px solid #e9eaed;border-radius:14px;box-shadow:0 4px 18px #17203312,0 1px 3px #17203308;color:#343a43;text-align:left;font:400 14px/1.7 "PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;scrollbar-width:thin}.word-popup:is([data-mode=selection],[data-mode=image]){max-width:min(420px,calc(100vw - 24px))}.word-heading{display:flex;align-items:center;gap:10px}.word-title{flex:1;font-size:17px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}.word-popup:is([data-mode=selection],[data-mode=image]) .word-title{font-size:11px;font-weight:400;letter-spacing:.03em;color:#9097a1}.word-close{display:grid;place-items:center;flex:none;width:22px;height:22px;border:0;border-radius:6px;background:none;color:#9aa1aa;font:400 18px/1 sans-serif;padding:0;cursor:pointer}.word-close:hover{background:#f4f5f7;color:#505966}.word-close:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-meaning{margin:8px 0 0;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.meaning-row{display:block}.meaning-row+.meaning-row{margin-top:5px}.meaning-pos{color:#929aa5;font-size:12px}.word-popup[data-loading=true] .word-meaning{font-size:12px;color:#929aa5}`;
     style.textContent += `.word-speak{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:5px;border:0;border-radius:8px;background:none;color:#929aa5;cursor:pointer}.word-speak:hover{background:#f5f6f8;color:#505966}.word-speak[aria-pressed=true]{color:#ed627e;background:#fff1f4}.word-speak:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-speak svg{width:18px;height:18px}.word-speech-error{margin:6px 0 0;color:#929aa5;font-size:12px}[hidden]{display:none!important}`;
     root.append(style);
     this.popup = doc.createElement('section');
     this.popup.className = 'word-popup';
+    this.popup.setAttribute('lang', 'zh-CN');
     this.popup.setAttribute('aria-label', 'AI 翻译结果');
     this.popup.hidden = true;
     const heading = doc.createElement('div');
@@ -1562,6 +1586,7 @@ function attachContentLookup(doc, win, gmRequest) {
   if (win.location.origin !== CONTENT_ORIGIN) return;
   const host = doc.createElement('div');
   host.setAttribute('data-abceed-ai-ui', '');
+  host.setAttribute('lang', 'zh-CN');
   host.style.cssText = 'position:fixed;z-index:2147483647;';
   const root = host.attachShadow({ mode: 'closed' });
   const style = doc.createElement('style');
@@ -1683,13 +1708,14 @@ function attachContentAutoTranslation(doc, win, request) {
   document.documentElement.append(selectionStyle);
   const host = document.createElement('div');
   host.setAttribute('data-abceed-ai-ui', '');
+  host.setAttribute('lang', 'zh-CN');
   host.setAttribute('translate', 'no');
   host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;';
   // Keep API settings out of the page's DOM and avoid site CSS interference.
   const root = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
   style.textContent = `
-    :host{all:initial;color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;font-weight:400;line-height:1.5;color:#262932;-webkit-font-smoothing:antialiased}
+    :host{all:initial;color-scheme:light;font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;font-weight:400;line-height:1.5;color:#262932;-webkit-font-smoothing:antialiased}
     *{box-sizing:border-box}button,input{font:inherit}button{cursor:pointer;transition:background .16s,box-shadow .16s,transform .16s}button:focus-visible,summary:focus-visible{outline:3px solid #fda4af;outline-offset:3px}button:active{transform:translateY(1px)}
     [hidden]{display:none!important}svg{display:block;flex:none;width:18px;height:18px}h2,p{margin:0}
     .toggle{display:flex;align-items:center;gap:7px;margin-left:auto;padding:9px 12px;border:1px solid #e6e7eb;border-radius:15px;background:#fff;color:#333640;box-shadow:0 3px 8px #17203308,0 8px 28px #17203312;font-weight:400;font-size:13px;letter-spacing:.01em}
@@ -1773,7 +1799,7 @@ function attachContentAutoTranslation(doc, win, request) {
   const start = el('button', '保存并开启', row, 'primary');
   const cacheFooter = el('div', '', content, 'cache-footer');
   const updateGroup = el('div', '', cacheFooter, 'update-group');
-  el('span', 'v1.11.5', updateGroup, 'version');
+  el('span', 'v1.11.6', updateGroup, 'version');
   const checkUpdate = el('button', '检查更新', updateGroup, 'cache-clear');
   const installUpdate = el('a', '', updateGroup, 'cache-clear');
   installUpdate.hidden = true;
@@ -1781,7 +1807,7 @@ function attachContentAutoTranslation(doc, win, request) {
   checkUpdate.onclick = async () => {
     checkUpdate.disabled = true; checkUpdate.textContent = '检查中…';
     try {
-      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.5');
+      const result = await checkForUpdate(GM_xmlhttpRequest, '1.11.6');
       if (result.available) {
         installUpdate.href = result.url; installUpdate.textContent = `更新至 v${result.version}`;
         installUpdate.hidden = false; checkUpdate.hidden = true;

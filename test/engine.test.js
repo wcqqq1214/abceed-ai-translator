@@ -214,3 +214,22 @@ test('fresh AI results and cached standalone count units both render as 题', as
   assert.equal(doc.body.textContent, '215题');
   dom.window.close();
 });
+
+test('translated text uses a CJK-only Chinese face without wrapping nodes or changing English siblings', async () => {
+  const { dom, engine, doc } = setup('<html lang="ja"><body><p id="jp" style="font-family:Arial">解説 A</p><p id="en" style="font-family:Georgia">English question</p></body></html>', async () => ['解析 A']);
+  const original = doc.querySelector('#jp').firstChild;
+  await engine.tick();
+  const jp = doc.querySelector('#jp');
+  assert.equal(jp.firstChild, original);
+  assert.equal(jp.lang, 'zh-CN');
+  assert.match(jp.style.fontFamily, /Abceed AI Chinese.*Arial/);
+  assert.equal(doc.querySelector('#en').style.fontFamily, 'Georgia');
+  assert.equal(doc.querySelector('#en').hasAttribute('lang'), false);
+  assert.equal(doc.documentElement.lang, 'ja');
+  const css = doc.head.querySelector('style').textContent;
+  assert.match(css, /unicode-range:U\+3000/);
+  assert.match(css, /local\("PingFang SC"\)/);
+  await engine.tick();
+  assert.equal(doc.head.querySelectorAll('style').length, 1);
+  dom.window.close();
+});
