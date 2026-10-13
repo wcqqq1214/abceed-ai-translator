@@ -141,13 +141,77 @@ export function selectionPopupPosition(anchor, width, height, viewportWidth, vie
   };
 }
 
+// Shared by the settings panel (main.js) and the lookup popup so both stay in one palette.
+export const THEME_VARS = '--accent:#e74764;--accent-strong:#d73b57;--accent-soft:#fff1f4;--accent-line:#ffe1e7;--ring:#ee8da0;--ink:#262932;--text:#343a43;--text-2:#717a87;--text-3:#8a929e;--line:#e7e8ed;--hover:#f4f5f7;--ok:#27a779;--warn:#a85d0a;--warn-soft:#fff6e8';
+
+const maskIcon = body => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>${body}</svg>`)}")`;
+const ICON_ALERT = maskIcon("<circle cx='12' cy='12' r='9'/><path d='M12 7.5v5.5M12 16.5h.01'/>");
+const ICON_SELECT = maskIcon("<path d='M4 7h16M4 12h10M4 17h13'/>");
+const ICON_IMAGE = maskIcon("<rect x='3' y='4' width='18' height='16' rx='3'/><circle cx='9' cy='10' r='1.6'/><path d='m21 16-5-5-9 9'/>");
+
+const POPUP_CSS = `
+.word-popup{${THEME_VARS};--ico-alert:${ICON_ALERT};--ico-select:${ICON_SELECT};--ico-image:${ICON_IMAGE};--enter-y:-5px;
+  --sans:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  position:fixed;box-sizing:border-box;width:max-content;min-width:min(200px,calc(100vw - 24px));max-width:min(320px,calc(100vw - 24px));max-height:220px;overflow:auto;overscroll-behavior:contain;padding:0 16px 14px;
+  background:linear-gradient(to top,#fff 30%,#fff0) bottom/100% 32px no-repeat local,radial-gradient(farthest-side at 50% 100%,#17203324,#17203300) bottom/100% 12px no-repeat scroll,#fff;
+  border:1px solid var(--line);border-radius:14px;box-shadow:0 8px 28px #1720331a,0 2px 6px #17203310;
+  color:var(--text);text-align:left;font:400 14px/1.7 var(--sans);-webkit-font-smoothing:antialiased;scrollbar-width:thin}
+.word-popup:is([data-mode=selection],[data-mode=image]){max-width:min(420px,calc(100vw - 24px))}
+.word-popup:not([hidden]){animation:wp-in .2s cubic-bezier(.2,.8,.2,1)}
+.word-heading{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:2px;padding:12px 0 6px;background:#fff}
+.word-title{flex:0 1 auto;min-width:0;margin-right:auto;padding-right:8px;color:var(--ink);font:600 19px/1.3 "New York","Iowan Old Style","Palatino Linotype",Georgia,serif;letter-spacing:.005em;overflow-wrap:anywhere}
+.word-popup:is([data-mode=selection],[data-mode=image]) .word-title{display:inline-flex;align-items:center;gap:5px;flex:none;margin-right:auto;padding:2px 10px 2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-family:var(--sans);font-size:11px;font-weight:500;line-height:1.6;letter-spacing:.02em}
+.word-popup:is([data-mode=selection],[data-mode=image]) .word-title::before{content:"";width:12px;height:12px;background:currentColor;-webkit-mask:var(--ico-select) center/contain no-repeat;mask:var(--ico-select) center/contain no-repeat}
+.word-popup[data-mode=image] .word-title::before{-webkit-mask-image:var(--ico-image);mask-image:var(--ico-image)}
+.word-speak,.word-close{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:5px;border:0;border-radius:8px;background:none;color:var(--text-3);cursor:pointer;transition:background .14s,color .14s,transform .14s}
+.word-speak:hover,.word-close:hover{background:var(--hover);color:var(--text)}
+.word-speak:active,.word-close:active{transform:scale(.94)}
+.word-speak:focus-visible,.word-close:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.word-speak svg{width:18px;height:18px}.word-close svg{width:16px;height:16px}
+.word-speak[aria-pressed=true]{color:var(--accent);background:var(--accent-soft);animation:wp-ring 1.6s ease-out infinite}
+.word-speak .wave{animation:wp-wave 1s ease-in-out infinite}.word-speak .wave+.wave{animation-delay:.18s}
+.word-speak .stop{display:none}
+.word-speak[aria-pressed=true]:is(:hover,:focus-visible) .on{display:none}
+.word-speak[aria-pressed=true]:is(:hover,:focus-visible) .stop{display:block}
+.word-refresh svg{transition:transform .35s cubic-bezier(.2,.8,.2,1)}
+.word-refresh:not(:disabled):hover svg{transform:rotate(60deg)}
+.word-refresh:disabled{cursor:wait;color:var(--accent)}
+.word-refresh:disabled svg{animation:wp-spin .8s linear infinite}
+.word-meaning{margin:0;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}
+.word-meaning:has(.meaning-row){display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:8px;row-gap:4px;white-space:normal}
+.meaning-row{display:grid;grid-template-columns:subgrid;grid-column:1/-1;align-items:baseline}
+.meaning-plain{grid-column:1/-1;white-space:pre-wrap}
+.meaning-pos{justify-self:start;padding:0 6px;border-radius:5px;background:var(--accent-soft);color:var(--accent);font-size:11px;font-weight:500;line-height:1.7;letter-spacing:.01em}
+.word-popup[data-loading=true] .word-meaning{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.word-skeleton{display:none;gap:9px;padding:4px 0 2px}
+.word-popup[data-loading=true] .word-skeleton{display:grid}
+.word-bar{height:10px;border-radius:5px;background:linear-gradient(90deg,var(--hover) 25%,#eaecf0 50%,var(--hover) 75%) 0 0/200% 100%;animation:wp-shimmer 1.4s linear infinite}
+.word-bar:nth-child(1){width:78%}.word-bar:nth-child(2){width:52%}.word-bar:nth-child(3){display:none;width:34%}
+.word-popup:is([data-mode=selection],[data-mode=image]) .word-bar:nth-child(1){width:100%}
+.word-popup:is([data-mode=selection],[data-mode=image]) .word-bar:nth-child(2){width:88%}
+.word-popup:is([data-mode=selection],[data-mode=image]) .word-bar:nth-child(3){display:block}
+.word-popup[data-loading=false] .word-meaning:not(:has(.meaning-row)){animation:wp-rise .26s cubic-bezier(.2,.8,.2,1) both}
+.word-meaning:has(.meaning-row) :is(.meaning-row,.meaning-plain){animation:wp-rise .26s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0)*40ms)}
+.word-popup[data-error=true] .word-meaning{display:flex;gap:7px;align-items:flex-start;color:var(--warn);font-size:13px}
+.word-popup[data-error=true] .word-meaning::before,.word-speech-error::before{content:"";flex:none;width:15px;height:15px;margin-top:4px;background:currentColor;-webkit-mask:var(--ico-alert) center/contain no-repeat;mask:var(--ico-alert) center/contain no-repeat}
+.word-speech-error{display:flex;gap:6px;align-items:flex-start;margin:8px 0 0;padding:6px 9px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:12px;line-height:1.6}
+.word-speech-error::before{width:13px;height:13px;margin-top:2px}
+[hidden]{display:none!important}
+@keyframes wp-in{from{opacity:0;transform:translateY(var(--enter-y))}to{opacity:1;transform:none}}
+@keyframes wp-rise{from{opacity:0;transform:translateY(4px)}}
+@keyframes wp-shimmer{to{background-position:-200% 0}}
+@keyframes wp-spin{to{transform:rotate(360deg)}}
+@keyframes wp-wave{0%,100%{opacity:.25}50%{opacity:1}}
+@keyframes wp-ring{0%{box-shadow:0 0 0 0 #e7476440}70%,100%{box-shadow:0 0 0 7px #e7476400}}
+@media(prefers-reduced-motion:reduce){.word-popup,.word-popup *{animation:none!important;transition:none!important}}
+`;
+
 export class WordLookup {
   constructor({ doc, win, root, getConfig, translate, translateSelection, translateImage, readImage, cache }) {
     Object.assign(this, { doc, win, root, getConfig, translate, translateSelection, translateImage, readImage, cache });
     this.generation = 0;
     const style = doc.createElement('style');
-    style.textContent = `.word-popup{position:fixed;box-sizing:border-box;width:max-content;min-width:min(200px,calc(100vw - 24px));max-width:min(320px,calc(100vw - 24px));max-height:220px;overflow:auto;padding:14px 16px;background:#fff;border:1px solid #e9eaed;border-radius:14px;box-shadow:0 4px 18px #17203312,0 1px 3px #17203308;color:#343a43;text-align:left;font:400 14px/1.7 "PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;scrollbar-width:thin}.word-popup:is([data-mode=selection],[data-mode=image]){max-width:min(420px,calc(100vw - 24px))}.word-heading{display:flex;align-items:center;gap:10px}.word-title{flex:1;font-size:17px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}.word-popup:is([data-mode=selection],[data-mode=image]) .word-title{font-size:11px;font-weight:400;letter-spacing:.03em;color:#9097a1}.word-close{display:grid;place-items:center;flex:none;width:22px;height:22px;border:0;border-radius:6px;background:none;color:#9aa1aa;font:400 18px/1 sans-serif;padding:0;cursor:pointer}.word-close:hover{background:#f4f5f7;color:#505966}.word-close:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-meaning{margin:8px 0 0;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.meaning-row{display:block}.meaning-row+.meaning-row{margin-top:5px}.meaning-pos{color:#929aa5;font-size:12px}.word-popup[data-loading=true] .word-meaning{font-size:12px;color:#929aa5}`;
-    style.textContent += `.word-speak{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:5px;border:0;border-radius:8px;background:none;color:#929aa5;cursor:pointer}.word-speak:hover{background:#f5f6f8;color:#505966}.word-speak[aria-pressed=true]{color:#ed627e;background:#fff1f4}.word-speak:focus-visible{outline:2px solid #ee8da0;outline-offset:2px}.word-speak svg{width:18px;height:18px}.word-speech-error{margin:6px 0 0;color:#929aa5;font-size:12px}[hidden]{display:none!important}`;
+    style.textContent = POPUP_CSS;
     root.append(style);
     this.popup = doc.createElement('section');
     this.popup.className = 'word-popup';
@@ -160,7 +224,8 @@ export class WordLookup {
     this.title.className = 'word-title';
     const close = doc.createElement('button');
     close.className = 'word-close';
-    close.textContent = '×';
+    close.type = 'button';
+    close.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
     close.setAttribute('aria-label', '关闭翻译结果');
     close.onclick = () => this.hide();
     this.speakButton = doc.createElement('button');
@@ -174,16 +239,19 @@ export class WordLookup {
     this.speechError.hidden = true;
     this.refreshButton = doc.createElement('button');
     this.refreshButton.type = 'button';
-    this.refreshButton.className = 'word-speak';
+    this.refreshButton.className = 'word-speak word-refresh';
     this.refreshButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9"/></svg>';
     this.refreshButton.title = '重新翻译';
     this.refreshButton.setAttribute('aria-label', '重新翻译');
-    style.textContent += '.word-speak:disabled{opacity:.4;cursor:wait}';
     heading.append(this.title, this.speakButton, this.refreshButton, close);
     this.meaning = doc.createElement('p');
     this.meaning.className = 'word-meaning';
     this.meaning.setAttribute('role', 'status');
-    this.popup.append(heading, this.meaning, this.speechError);
+    this.skeleton = doc.createElement('div');
+    this.skeleton.className = 'word-skeleton';
+    this.skeleton.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < 3; i++) { const bar = doc.createElement('span'); bar.className = 'word-bar'; this.skeleton.append(bar); }
+    this.popup.append(heading, this.skeleton, this.meaning, this.speechError);
     this.refreshError = doc.createElement('p');
     this.refreshError.className = 'word-speech-error';
     this.refreshError.setAttribute('role', 'status');
@@ -257,7 +325,7 @@ export class WordLookup {
     this.speakButton.setAttribute('aria-label', active ? '停止发音' : '朗读英文');
     this.speakButton.title = active ? '停止发音' : '朗读英文';
     this.speakButton.innerHTML = active
-      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>'
+      ? '<svg class="on" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path class="wave" d="M15 8a6 6 0 0 1 0 8"/><path class="wave" d="M18 5a10 10 0 0 1 0 14"/></svg><svg class="stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>'
       : '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14"/></svg>';
   }
 
@@ -311,6 +379,7 @@ export class WordLookup {
     this.generation++;
     this.controller?.abort();
     this.popup.hidden = true;
+    delete this.popup.dataset.error;
     this.sourceImage = undefined;
     this.refreshButton.onclick = null;
     this.refreshError.hidden = true;
@@ -332,7 +401,12 @@ export class WordLookup {
     this.popup.style.top = `${placement.top}px`;
     this.popup.style.maxHeight = `${placement.maxHeight}px`;
     const actualHeight = this.popup.getBoundingClientRect().height;
-    this.popup.style.top = `${Math.max(12, Math.min(placement.top, this.win.innerHeight - actualHeight - 12))}px`;
+    const top = Math.max(12, Math.min(placement.top, this.win.innerHeight - actualHeight - 12));
+    this.popup.style.top = `${top}px`;
+    // Slide in from the anchor: popups above the selection rise, popups below it drop.
+    const above = top + actualHeight <= (anchor?.top ?? y) + 2 && top < (anchor?.top ?? y);
+    this.popup.style.setProperty('--enter-y', above ? '5px' : '-5px');
+    this.popup.style.transformOrigin = above ? 'left bottom' : 'left top';
   }
 
   renderMeaning(text, mode) {
@@ -342,10 +416,17 @@ export class WordLookup {
     const formatted = mode === 'word' ? formatWordMeaning(text) : text;
     const pos = /^(\s*)((?:modal v|n|v|vt|vi|adj|adv|pron|prep|conj|art|interj|num|aux)\.)(\s*)([\s\S]*)$/;
     const rows = mode === 'word' ? formatted.split(/[；;\n]+(?=\s*(?:modal v|n|v|vt|vi|adj|adv|pron|prep|conj|art|interj|num|aux)\.)/) : [formatted];
+    // Only mixed results need wrapping, so the rows can share one grid.
+    const grid = mode === 'word' && rows.some(row => pos.test(row));
+    let index = 0;
     for (const row of rows) {
       const match = mode === 'word' && row.match(pos);
-      if (!match) { this.meaning.append(this.doc.createTextNode(row)); continue; }
-      const line = this.doc.createElement('span'); line.className = 'meaning-row';
+      if (!match && !grid) { this.meaning.append(this.doc.createTextNode(row)); continue; }
+      if (!match) {
+        const plain = this.doc.createElement('span'); plain.className = 'meaning-plain'; plain.textContent = row;
+        plain.style.setProperty('--i', index++); this.meaning.append(plain); continue;
+      }
+      const line = this.doc.createElement('span'); line.className = 'meaning-row'; line.style.setProperty('--i', index++);
       const label = this.doc.createElement('span'); label.className = 'meaning-pos'; label.textContent = match[2];
       line.append(label, this.doc.createTextNode(' ' + match[4]));
       this.meaning.append(line);
@@ -419,7 +500,7 @@ export class WordLookup {
         this.renderMeaning(previous, mode);
         this.refreshError.textContent = `重新翻译失败，已保留原译文。${error.message}`;
         this.refreshError.hidden = false;
-      } else this.meaning.textContent = error.message;
+      } else { this.meaning.textContent = error.message; this.popup.dataset.error = 'true'; }
     } finally {
       if (generation === this.generation) this.refreshButton.disabled = false;
     }
